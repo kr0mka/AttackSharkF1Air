@@ -65,14 +65,18 @@ export function decodeLegacyDpi(block) {
 // Layout: X DPI LE16, Y DPI LE16, mode/flag, checksum.
 export function encodeHighResDpi(dpi, flag = F1_AIR_PROFILE.dpi.highResFlag) {
   const value = Math.max(F1_AIR_PROFILE.dpi.min, Math.min(F1_AIR_PROFILE.dpi.max, Math.round(Number(dpi))));
-  const payload = Uint8Array.of(value & 0xff, (value >> 8) & 0xff, value & 0xff, (value >> 8) & 0xff, flag);
+  // PAW3955 high-resolution register stores CPI as (requested DPI - 1).
+  const rawValue = value - 1;
+  const payload = Uint8Array.of(rawValue & 0xff, (rawValue >> 8) & 0xff, rawValue & 0xff, (rawValue >> 8) & 0xff, flag);
   return checksummedBlock(payload);
 }
 
 export function decodeHighResDpi(block) {
   if (!block || block.length < 6 || !checksumValid(block.slice(0, 6))) return null;
-  const x = block[0] | (block[1] << 8);
-  const y = block[2] | (block[3] << 8);
+  const xRaw = block[0] | (block[1] << 8);
+  const yRaw = block[2] | (block[3] << 8);
+  const x = xRaw + 1;
+  const y = yRaw + 1;
   return { x, y, dpi: x === y ? x : Math.round((x + y) / 2), flag: block[4] };
 }
 
