@@ -90,6 +90,22 @@ It documents PAW3955MAX, 1–60,000 DPI in 1-DPI increments, dual 8000 Hz, 20K F
 
 Independent open-source CompX/WebHID research was used only as a protocol sanity check, especially for report framing/checksums. F1 AIR-specific values in this repository are taken from the supplied F1 package wherever the two differ.
 
+## First real F1 AIR hardware capture
+
+A live F1 AIR connected through the 8K receiver identified itself as:
+
+- PID `0xF517`; CID `124`; MID `20`; device type `5` (Wireless 8K);
+- receiver firmware `5.02`;
+- six enabled DPI stages with current stage index `2`;
+- base report-rate record `04 51` (250 Hz);
+- current LOD record `01 54` (raw value `1`).
+
+The high-resolution table at `0x1B00` established an important F1-specific detail: the 16-bit PAW3955 value is stored as **DPI - 1**. For example, stage 3 returned `D7 0E` (`0x0ED7 = 3799`) while the configured value is 3800 DPI. Other captures line up the same way (`AF 04` = 1199 -> 1200, `5F 09` = 2399 -> 2400, etc.). The writer therefore subtracts one and the decoder adds one.
+
+The same session showed that sending battery/version/profile/range requests concurrently causes the receiver to answer only a subset of them. The vendor DLL serializes exchanges; the open transport now does the same so only one request/response transaction is outstanding at a time. Wireless mouse firmware is queried with the vendor DLL's slave-version opcode `0xB3`, while receiver firmware remains `0x1D`.
+
+The current official web UI was also captured exposing the five F1 AIR LOD choices: **0.7, 0.9, 1.2, 1.4 and 1.6 mm**. Their raw-byte mapping is still deliberately unresolved: the connected mouse currently reports raw `1`, but a single-setting capture for each option is needed before assigning labels to raw values.
+
 ## Confidence ledger
 
 | Area | Confidence | Treatment |
