@@ -88,10 +88,11 @@ export class MouseModel extends EventTarget {
   async initialize() {
     await this.hid.setDriverActive(true);
     const handshake = await this.hid.handshake();
+    const wirelessDevice = [0, 1, 4, 5].includes(handshake.deviceType);
     const [online, battery, mouseVersion, dongleVersion, profile, longRange] = await Promise.allSettled([
       this.hid.getOnline(),
       this.hid.getBattery(),
-      this.hid.getVersion(OPCODE.READ_VERSION),
+      this.hid.getVersion(wirelessDevice ? OPCODE.GET_SLAVE_VERSION : OPCODE.READ_VERSION),
       this.hid.getVersion(OPCODE.GET_DONGLE_VERSION),
       this.hid.getCurrentProfile(),
       this.hid.getLongRangeMode(),
@@ -215,7 +216,11 @@ export class MouseModel extends EventTarget {
     if (i < 0 || i >= DPI_STAGE_COUNT) throw new Error('DPI stage out of range.');
     const value = Math.max(F1_AIR_PROFILE.dpi.min, Math.min(F1_AIR_PROFILE.dpi.max, Math.round(Number(dpi))));
     // The PAW3955 profile carries an exact 16-bit X/Y table at 0x1B00.
-    await this.hid.writeFlash(ADDRESS.HIGH_RES_DPI + i * 6, encodeHighResDpi(value));
+    // Preserve the stage's observed mode flag. Real F1 AIR captures use 0x00
+    // for ordinary ranges and can retain 0x11 on a stage; >42K needs 0x11.
+    const existingFlag = this.highResDpi[i]?.parsed?.flag ?? 0;
+    const highResFlag = value > 42000 ? 0x11 : existingFlag;
+    await this.hid.writeFlash(ADDRESS.HIGH_RES_DPI + i * 6, encodeHighResDpi(value, highResFlag));
     // Keep the legacy table coherent for firmware/UI paths which still consult it.
     await this.hid.writeFlash(ADDRESS.DPI_VALUES + i * 4, encodeLegacyDpi(value));
     await this.refreshSettings();
