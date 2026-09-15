@@ -6,6 +6,7 @@ import {
   REPORT_ID,
   VENDOR_ID,
 } from './constants.js';
+import { calibratedBatteryPercent } from './battery.js';
 import { checksumFor, hex, u8 } from './codecs.js';
 
 export function packetBody(opcode, { address = 0, length = 0, payload = [], feature = false } = {}) {
@@ -186,10 +187,16 @@ export class CompXDevice extends EventTarget {
 
   async getBattery() {
     const response = await this.command(OPCODE.BATTERY);
+    const rawPercent = response[5];
+    const charging = Boolean(response[6]);
+    const millivolts = (response[7] << 8) | response[8];
     return {
-      percent: response[5],
-      charging: Boolean(response[6]),
-      millivolts: (response[7] << 8) | response[8],
+      // The desktop app does not display the raw firmware percentage. It uses
+      // the model's BatteryParam voltage curve through HIDUsb.dll's optimizer.
+      percent: calibratedBatteryPercent(millivolts, charging) ?? rawPercent,
+      rawPercent,
+      charging,
+      millivolts,
       raw: response,
     };
   }
