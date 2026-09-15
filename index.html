@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>F1 AIR Open Control</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">AS</div>
+      <div>
+        <h1>F1 AIR <span>Open Control</span></h1>
+        <p>Community WebHID control panel · clean-room protocol implementation</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="connection-pill" class="pill offline"><i></i><span>Disconnected</span></span>
+      <button id="refresh-btn" class="button ghost" disabled>Refresh</button>
+      <button id="connect-btn" class="button primary">Connect mouse</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <nav id="nav">
+        <button data-tab="overview" class="nav-item active"><span>01</span>Overview</button>
+        <button data-tab="sensor" class="nav-item"><span>02</span>Sensor</button>
+        <button data-tab="buttons" class="nav-item"><span>03</span>Buttons</button>
+        <button data-tab="macros" class="nav-item"><span>04</span>Macros & shortcuts</button>
+        <button data-tab="lighting" class="nav-item"><span>05</span>Lighting</button>
+        <button data-tab="profiles" class="nav-item"><span>06</span>Profiles & device</button>
+        <button data-tab="diagnostics" class="nav-item"><span>07</span>Diagnostics</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="compat-card">
+          <strong>Target</strong>
+          <span>F1 AIR / PAW3955</span>
+          <small>VID 3554 · CID 124 · MID 19–22</small>
+        </div>
+        <label class="expert-toggle">
+          <input id="expert-writes" type="checkbox" />
+          <span><b>Expert writes</b><small>Allow writes to an unverified CID/MID.</small></span>
+        </label>
+      </div>
+    </aside>
+
+    <main>
+      <div id="unsupported-browser" class="notice warning hidden">
+        <strong>WebHID is not available in this browser.</strong>
+        Use Chrome, Edge, Brave or another Chromium browser. Serve this folder from <code>localhost</code> or HTTPS.
+      </div>
+      <div id="safety-notice" class="notice info">
+        This app reads the device before it writes. Settings writes are verified by reading them back. Firmware flashing is intentionally not enabled until the bootloader transfer protocol is independently verified.
+      </div>
+      <section id="content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="toast-stack" class="toast-stack"></div>
+  <input id="backup-file" type="file" accept="application/json,.json" hidden />
+  <input id="firmware-file" type="file" accept=".bin,application/octet-stream" hidden />
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirm-title">Confirm</h2>
+      <p id="confirm-copy"></p>
+      <div class="dialog-actions">
+        <button value="cancel" class="button ghost">Cancel</button>
+        <button value="confirm" class="button danger">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
