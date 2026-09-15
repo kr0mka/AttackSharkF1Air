@@ -18,7 +18,7 @@ import {
   encodeShortcut,
   parityPair,
 } from '../src/codecs.js';
-import { packetBody, packetChecksumValid, rawCommandBody } from '../src/protocol.js';
+import { CompXDevice, packetBody, packetChecksumValid, rawCommandBody } from '../src/protocol.js';
 
 const sum = (bytes) => [...bytes].reduce((a,b)=>(a+b)&0xff,0);
 
@@ -50,6 +50,8 @@ test('F1 high-resolution DPI record round-trips exact values', () => {
     const raw = encodeHighResDpi(dpi);
     assert.equal(raw.length, 6);
     assert.equal(checksumValid(raw), true);
+    const stored = raw[0] | (raw[1] << 8);
+    assert.equal(stored, dpi - 1);
     assert.deepEqual(decodeHighResDpi(raw), { x:dpi, y:dpi, dpi, flag:0x11 });
   }
 });
@@ -107,4 +109,30 @@ test('receiver-marker command keeps 0x0A marker instead of payload length', () =
   assert.equal(body[4], 0x0a);
   assert.deepEqual([...body.slice(5, 8)], [2,3,4]);
   assert.equal(packetChecksumValid(body), true);
+});
+
+test('wireless slave-version opcode recovered from vendor DLL', () => {
+  assert.equal(OPCODE.GET_SLAVE_VERSION, 0xb3);
+});
+
+
+test('request/response exchanges are serialized for the receiver', async () => {
+  const device = new CompXDevice();
+  const sent = [];
+  const resolvers = [];
+  device.waitFor = () => new Promise((resolve) => resolvers.push(resolve));
+  device.send = async (_body, note) => { sent.push(note); };
+
+  const first = device.exchange(new Uint8Array(16), () => true, 900, 'first');
+  const second = device.exchange(new Uint8Array(16), () => true, 900, 'second');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent, ['first']);
+
+  resolvers[0](new Uint8Array(16));
+  await first;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent, ['first', 'second']);
+
+  resolvers[1](new Uint8Array(16));
+  await second;
 });
