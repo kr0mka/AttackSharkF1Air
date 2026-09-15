@@ -50,6 +50,9 @@ export class CompXDevice extends EventTarget {
     this.waiters = [];
     this.log = [];
     this.maxLog = 500;
+    // The F1 AIR 8K receiver only reliably services one request/response
+    // transaction at a time. The vendor DLL serializes these exchanges too.
+    this._exchangeTail = Promise.resolve();
     this._inputHandler = this._onInputReport.bind(this);
   }
 
@@ -137,10 +140,21 @@ export class CompXDevice extends EventTarget {
     });
   }
 
+  _serializeExchange(task) {
+    const run = this._exchangeTail.then(task, task);
+    // Keep the queue usable after a failed/timed-out command.
+    this._exchangeTail = run.catch(() => {});
+    return run;
+  }
+
   async exchange(body, predicate, timeoutMs = 900, note = '') {
-    const response = this.waitFor(predicate, timeoutMs);
-    await this.send(body, note);
-    return response;
+    return this._serializeExchange(async () => {
+      // Start the timeout only when this transaction reaches the head of the
+      // queue; otherwise queued commands could expire before they are sent.
+      const response = this.waitFor(predicate, timeoutMs);
+      await this.send(body, note);
+      return response;
+    });
   }
 
   async command(opcode, payload = [], { timeoutMs = 900, marker = null, responseOpcode = opcode } = {}) {
