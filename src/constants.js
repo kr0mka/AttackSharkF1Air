@@ -82,7 +82,10 @@ export const ADDRESS = Object.freeze({
 
 export const BASE_SETTINGS_SIZE = 0x00e8;
 export const DPI_STAGE_COUNT = 8;
+// Six 4-byte records exist in flash, but F1 AIR exposes only five physical controls.
+// The sixth record is preserved as an internal logical slot (captured default: DPI cycle).
 export const BUTTON_COUNT = 6;
+export const PHYSICAL_BUTTON_COUNT = 5;
 export const SHORTCUT_SLOT_COUNT = 16;
 export const SHORTCUT_SLOT_SIZE = 32;
 export const MACRO_SLOT_COUNT = 16;
@@ -172,8 +175,9 @@ export const BUTTON_ACTIONS = Object.freeze([
   { key: 'left', label: 'Left button', type: 0x01, param: 0x0100 },
   { key: 'right', label: 'Right button', type: 0x01, param: 0x0200 },
   { key: 'middle', label: 'Middle / wheel click', type: 0x01, param: 0x0400 },
-  { key: 'back', label: 'Back', type: 0x01, param: 0x0800 },
-  { key: 'forward', label: 'Forward', type: 0x01, param: 0x1000 },
+  // F1 AIR vendor UI/default profile identifies 0x0800 as Forward and 0x1000 as Backward.
+  { key: 'forward', label: 'Forward', type: 0x01, param: 0x0800 },
+  { key: 'back', label: 'Backward', type: 0x01, param: 0x1000 },
   { key: 'dpi-cycle', label: 'DPI cycle', type: 0x02, param: 0x0100 },
   { key: 'dpi-up', label: 'DPI +', type: 0x02, param: 0x0200 },
   { key: 'dpi-down', label: 'DPI −', type: 0x02, param: 0x0300 },
@@ -192,7 +196,14 @@ export const BUTTON_ACTIONS = Object.freeze([
   { key: 'light-strip-cycle', label: 'Cycle light-strip effect', type: 0x16, param: 0x0000 },
 ]);
 
-export const MOUSE_BUTTON_NAMES = ['Left', 'Right', 'Middle', 'Back', 'Forward', 'DPI / Top'];
+export const MOUSE_BUTTON_NAMES = [
+  'Left',
+  'Right',
+  'Wheel click',
+  'Forward',
+  'Backward',
+  'Internal DPI slot',
+];
 
 export const CONSUMER_KEYS = Object.freeze([
   { usage: 0x00cd, label: 'Play / Pause' },
@@ -209,6 +220,6 @@ export const MACRO_MOUSE_EVENTS = Object.freeze([
   { code: 0x04, data1: 0x00, data2: 0x01, label: 'Left click' },
   { code: 0x04, data1: 0x00, data2: 0x02, label: 'Right click' },
   { code: 0x04, data1: 0x00, data2: 0x04, label: 'Middle click' },
-  { code: 0x04, data1: 0x00, data2: 0x10, label: 'Forward click' },
-  { code: 0x04, data1: 0x00, data2: 0x08, label: 'Back click' },
+  { code: 0x04, data1: 0x00, data2: 0x08, label: 'Forward click' },
+  { code: 0x04, data1: 0x00, data2: 0x10, label: 'Backward click' },
 ]);
