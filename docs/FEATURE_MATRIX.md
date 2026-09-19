@@ -17,7 +17,7 @@
 | Angle snap | Implemented | onboard setting |
 | Motion sync | Implemented | onboard setting |
 | 20K FPS scan | Experimental | desktop + DLL trace establishes 0xE1 off/on = 0/1; hardware confirmation pending |
-| Mouse rotation / angle mode | Experimental | −30..+30 signed degrees at 0xBD + enable at 0xBF; static trace, hardware confirmation pending |
+| Mouse rotation / angle mode | Experimental | −30..+30 signed degrees at 0xBD + companion flag at 0xBF; static trace, hardware confirmation pending |
 | Dynamic Sensitivity presets/custom curve | Availability unconfirmed | shared resources only; owner reports no control in current official UI; advanced bytes remain semantically unassigned |
 | Five physical button remaps | Implemented | sixth logical firmware slot preserved, hidden from physical UI |
 | DPI/polling/profile/light actions | Implemented | vendor action IDs |
