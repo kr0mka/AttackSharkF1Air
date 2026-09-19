@@ -2,6 +2,12 @@
 
 This project is a clean-room interoperability implementation. No Attack Shark executable, DLL, firmware image, UI artwork, or vendor source code is included in the repository.
 
+## September 2026 screenshot and static-trace corrections
+
+See [F1_AIR_ADVANCED.md](F1_AIR_ADVANCED.md) for the complete executable-handler → configuration-structure → DLL-flash-writer evidence chain. It corrects the angle address to `0xBD/0xBF`, identifies 20K scan at `0xE1`, and establishes three receiver assignment bytes. These semantics remain candidates pending controlled hardware captures. The supplied web 1.2.0 and desktop 1.0.2.0 screenshots do not show Dynamic Sensitivity. Current screenshots show three configured DPI stages and a physical side button assigned DPI cycle; neither contradicts the earlier six-stage capture or proves a sixth physical button.
+
+The same static pass found a macro-checksum bug: DLL `MacroKeyToBuffer` RVA `0xA740` calls the checksum helper with start `31` and exclusive end `32 + 5*n` at `0xA7EC..0xA7FC`. `BufferToMacroKey` at `0xA820` validates the same range (`0xA883..0xA8A1`). Helper `0x10E30` sums the selected range and returns `0x55 - sum` at `0x10F26..0x10F2E`. Names/header padding are excluded. The parser accepts 2–70 macro events; shortcut encoder/parser `0xA560/0xA640` accepts 2–6. Independent synthetic wire fixtures now cover the corrected range and count boundaries; no live macro execution was performed.
+
 ## Supplied package inspected
 
 The user supplied `ATTACK SHARK MOUSE HUB.zip`. Relevant artifacts included:
@@ -122,8 +128,9 @@ The current official web UI was also captured exposing the five F1 AIR LOD choic
 | light-bar record structure | medium-high | normal UI |
 | receiver indicator commands | structure known; semantics candidate | read-only capture; Expert writes |
 | 5-level F1 LOD raw mapping | verified | five physical levels |
-| sensor rotation semantics at `0x0006` | unresolved | explicitly experimental |
-| 20K scan semantics at `0x0008` | medium | explicitly experimental |
+| signed mouse angle at `0xBD`, companion flag at `0xBF` | static desktop + DLL trace; hardware pending | Expert writes |
+| 20K scan at `0xE1`, off/on = 0/1 | static desktop + DLL trace; hardware pending | Expert writes |
+| scalars at `0x0006` and `0x0008` | unknown; former angle/20K hypotheses rejected | preserve |
 | Dynamic Sensitivity availability and byte meanings | unconfirmed; absent in owner-reported UI | defer experiment; preserve advanced raw records without assigning this feature |
 | firepower parameter bits | medium-low | explicitly experimental |
 | macro repeat-policy binding bits | unresolved | not guessed |
@@ -137,7 +144,7 @@ A real F1 AIR connected to the official driver can resolve the remaining user-fa
 2. bind one known macro using each repeat policy and compare only its four-byte button record;
 3. only if Dynamic Sensitivity is actually exposed on F1 AIR, compare individual mode changes across the full base block; no particular address is established;
 4. only after confirming such a control exists, change one custom curve point per capture; currently deferred because the owner reports no Dynamic Sensitivity control;
-5. change mouse rotation by a few known angles and compare `0x0006` plus the advanced range.
+5. change mouse rotation by a few known angles and compare `0xBD/0xBF` while retaining the entire base block.
 
 The project's Diagnostics tab and `tools/webhid-sniffer.js` exist specifically for these captures.
 

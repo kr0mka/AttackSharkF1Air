@@ -39,6 +39,7 @@ import {
 } from './codecs.js';
 import { fieldForAddress } from './protocol-map.js';
 import { restoreSpans, validateBackupRegions } from './protocol/backup.js';
+import { decodeAngle, encodeAngle } from './features/sensor/angle.js';
 
 const pair = (base, address, fallback = null) => decodeParityPair(base.slice(address, address + 2), fallback);
 
@@ -162,7 +163,10 @@ export class MouseModel extends EventTarget {
       reportRateHz: RAW_TO_POLLING_RATE.get(pair(base, ADDRESS.REPORT_RATE)) ?? null,
       stageCount,
       currentStage,
-      sensorStaticScan: pair(base, ADDRESS.SENSOR_STATIC_SCAN),
+      sensorStaticScan: pair(base, ADDRESS.SCAN_20K),
+      sensorRotationRaw: pair(base, ADDRESS.SENSOR_ANGLE),
+      sensorRotationDegrees: decodeAngle(pair(base, ADDRESS.SENSOR_ANGLE)),
+      sensorRotationFlag: pair(base, ADDRESS.SENSOR_ANGLE_FLAG),
       lodRaw: pair(base, ADDRESS.LOD),
       dpiLegacy,
       dpiColors,
@@ -267,6 +271,15 @@ export class MouseModel extends EventTarget {
     await this.refreshSettings();
   }
 
+  async setSensorAngle(degrees) {
+    if (!this.expertWrites) throw new Error('Mouse angle requires Expert writes until hardware capture verification.');
+    const raw = encodeAngle(degrees);
+    // Match the desktop handler: degree byte followed by companion flag = 1.
+    // Only these two pairs are replaced; neighboring advanced bytes survive.
+    await this.hid.writeFlash(ADDRESS.SENSOR_ANGLE, Uint8Array.of(...parityPair(raw), ...parityPair(1)));
+    await this.refreshSettings();
+  }
+
   async setButton(index, type, param = 0) {
     const i = Number(index);
     integerInRange(i, 0, PHYSICAL_BUTTON_COUNT - 1, 'Physical button index');
@@ -362,11 +375,19 @@ export class MouseModel extends EventTarget {
     return this.hid.getReceiverIndicator();
   }
 
-  async setReceiverIndicator(mode, arg1 = 0, arg2 = 0) {
+  async setReceiverIndicator(index, assignment) {
     if (!this.expertWrites) throw new Error('Receiver indicator assignment semantics require Expert writes.');
-    for (const value of [mode, arg1, arg2]) integerInRange(value, 0, 255, 'Receiver value');
-    await this.hid.setReceiverIndicator(mode, arg1, arg2);
-    return this.getReceiverIndicator();
+    integerInRange(index, 0, 2, 'Receiver LED index');
+    integerInRange(assignment, 0, 255, 'Receiver assignment');
+    // Read at write time: retain both other LEDs, including unrecognized values.
+    const current = await this.getReceiverIndicator();
+    const assignments = [...current.assignments];
+    if (assignments[index] === assignment) return current;
+    assignments[index] = assignment;
+    await this.hid.setReceiverIndicator(assignments);
+    const result = await this.getReceiverIndicator();
+    if (!assignments.every((value, i) => value === result.assignments[i])) throw new Error('Receiver assignment read-back mismatch; read receiver state again.');
+    return result;
   }
 
   async createBackup({ includeMacros = true, includeShortcuts = true } = {}) {

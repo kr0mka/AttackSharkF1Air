@@ -27,7 +27,7 @@ The application implements the F1 AIR / PAW3955 control surface with:
 
 Verified LOD and side-button mappings are documented in [F1_AIR_LOD.md](docs/F1_AIR_LOD.md) and [F1_AIR_BUTTONS.md](docs/F1_AIR_BUTTONS.md).
 
-Dynamic Sensitivity appears in shared vendor resources, but F1 AIR availability is unconfirmed and the owner does not see it in the current official UI. It is not a required capture or an established F1 AIR feature. Rotation, 20K scanning values, lighting assignment semantics and macro repeat bindings still need controlled captures for controls actually exposed by the device. Candidate scalar fields, unknown button parameters and receiver indicator writes require **Expert writes**. Resource enum values alone do not establish their packet encoding.
+Dynamic Sensitivity appears in shared vendor resources, but neither official UI shown by the owner exposes it. It is not a required capture or an established F1 AIR feature. The [advanced-control trace](docs/F1_AIR_ADVANCED.md) establishes signed −30..+30° angle at `0xBD/0xBF` and 20K off/on at `0xE1`; both are exposed as experimental controls awaiting hardware captures. Lighting now has three independent receiver LED selectors that preserve unknown assignments. Candidate fields, unknown button parameters and receiver indicator writes require **Expert writes**. Macro repeat bindings remain unassigned.
 
 The wireless `0xB3` endpoint returned v5.02 while the official app displayed v5.23. Diagnostics exports raw `0x12`, `0x1D` and `0xB3` replies; the app does not equate `0xB3` with the official mouse firmware display.
 

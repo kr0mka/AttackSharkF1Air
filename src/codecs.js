@@ -150,7 +150,8 @@ export function encodeMacro({ name = 'Macro', events = [] } = {}, { original = n
   const out = original ? Uint8Array.from(original) : new Uint8Array(MACRO_SLOT_SIZE);
   const encodedName = new TextEncoder().encode(String(name));
   const nameBytes = encodedName.slice(0, 30);
-  const safeEvents = events.slice(0, 70);
+  if (!Array.isArray(events) || events.length < 2 || events.length > 70) throw new Error('Macros require 2–70 events; events are never silently truncated.');
+  const safeEvents = events;
   out[0] = Math.max(1, nameBytes.length);
   out.set(nameBytes.length ? nameBytes : Uint8Array.of(0x4d), 1);
   out[31] = safeEvents.length;
@@ -165,14 +166,16 @@ export function encodeMacro({ name = 'Macro', events = [] } = {}, { original = n
     out[cursor + 4] = delay & 0xff;
     cursor += 5;
   }
-  out[cursor] = checksumFor(out.slice(0, cursor));
+  // HIDUsb.dll checks [31, end): count + events, excluding name and padding.
+  out[cursor] = checksumFor(out.slice(31, cursor));
   return out;
 }
 
 export function decodeMacro(raw) {
   if (!raw || raw.length < 33) return { name: '', events: [], valid: false };
-  const nameLength = Math.min(30, raw[0]);
-  const count = Math.min(70, raw[31]);
+  const nameLength = raw[0];
+  const count = raw[31];
+  if (nameLength < 1 || nameLength > 30 || count < 2 || count > 70) return { name: '', events: [], valid: false };
   const checksumIndex = 32 + count * 5;
   if (checksumIndex >= raw.length) return { name: '', events: [], valid: false };
   const name = new TextDecoder().decode(raw.slice(1, 1 + nameLength)).replace(/\0+$/, '');
@@ -189,13 +192,14 @@ export function decodeMacro(raw) {
       delayMs: (raw[p + 3] << 8) | raw[p + 4],
     });
   }
-  return { name, events, valid: checksumValid(raw.slice(0, checksumIndex + 1)) };
+  return { name, events, valid: checksumValid(raw.slice(31, checksumIndex + 1)) };
 }
 
 export function encodeShortcut(events = [], { original = null } = {}) {
   if (original && original.length !== SHORTCUT_SLOT_SIZE) throw new Error('Original shortcut slot must contain 32 bytes.');
   const out = original ? Uint8Array.from(original) : new Uint8Array(SHORTCUT_SLOT_SIZE);
-  const safe = events.slice(0, 6);
+  if (!Array.isArray(events) || events.length < 2 || events.length > 6) throw new Error('Shortcuts require 2–6 events; events are never silently truncated.');
+  const safe = events;
   out[0] = safe.length;
   let cursor = 1;
   for (const event of safe) {
@@ -210,7 +214,8 @@ export function encodeShortcut(events = [], { original = null } = {}) {
 
 export function decodeShortcut(raw) {
   if (!raw?.length) return { events: [], valid: false };
-  const count = Math.min(6, raw[0]);
+  const count = raw[0];
+  if (count < 2 || count > 6) return { events: [], valid: false };
   const end = 1 + count * 3;
   if (end >= raw.length) return { events: [], valid: false };
   const events = [];

@@ -92,8 +92,8 @@ The desktop DLL reads a 232-byte base-settings block (`0x0000..0x00E7`). The fol
 | `0x0000` | 2 | polling-rate raw value + parity |
 | `0x0002` | 2 | number of DPI stages |
 | `0x0004` | 2 | current DPI stage |
-| `0x0006` | 2 | advanced sensor-angle/rotation byte; semantics experimental |
-| `0x0008` | 2 | 20K/static scan setting; semantics experimental |
+| `0x0006` | 2 | unknown scalar; former angle hypothesis rejected |
+| `0x0008` | 2 | unknown scalar; former 20K hypothesis rejected |
 | `0x000A` | 2 | LOD raw setting |
 | `0x000C` | 8×4 | legacy DPI table |
 | `0x002C` | 8×4 | per-stage DPI colors |
@@ -112,6 +112,9 @@ The desktop DLL reads a 232-byte base-settings block (`0x0000..0x00E7`). The fol
 | `0x00B5` | 2 | highest-performance state |
 | `0x00B7` | 2 | highest-performance timer |
 | `0x00B9` | 2 | sensor LP/HP mode |
+| `0x00BD` | 2 | signed mouse angle in degrees; static trace, hardware capture pending |
+| `0x00BF` | 2 | angle companion flag; desktop save sets 1 |
+| `0x00E1` | 2 | 20K scan; desktop off/on = 0/1 |
 | `0x00BD..0x00E7` | mixed | advanced records; structure recovered, feature associations and semantics unproven |
 
 ### Extended advanced records
@@ -122,7 +125,7 @@ The bundled parser validates the following post-`0xB9` records:
 - four records of `4 data bytes + checksum` at `0xC3`, `0xC8`, `0xCD`, `0xD2`;
 - a compact record beginning at `0xDB`.
 
-Shared desktop language resources contain **DPI Dynamic Sensitivity** names (Classic/Natural/Jump/Custom), but do not establish a relationship to these addresses or F1 AIR support. The owner reports no such control in the current official UI. These advanced bytes remain semantically unassigned; Diagnostics labels them as unverified advanced records. Raw backups retain them, normal restore leaves current candidate/unmapped bytes untouched, and Expert restore can copy them back.
+Shared desktop language resources contain **DPI Dynamic Sensitivity** names (Classic/Natural/Jump/Custom), but do not establish a relationship to these addresses or F1 AIR support. Neither UI shown by the owner exposes it. Static tracing instead identifies angle at `0xBD/0xBF` and 20K scanning at `0xE1`; see [F1_AIR_ADVANCED.md](F1_AIR_ADVANCED.md) for the complete evidence chain. Other advanced records remain semantically unassigned. Normal restore leaves candidate/unmapped bytes untouched; Expert restore can copy them back. The parser's final pair starts at `0xE7` and needs checksum byte `0xE8`, which is outside the current 232-byte base snapshot; it must not be treated as a validated complete pair.
 
 ## Polling-rate values
 
@@ -194,9 +197,11 @@ Recovered layout:
 
 - byte 0: macro name length (`1..30`)
 - bytes 1..30: UTF-8 name
-- byte 31: event count (up to 70 in the bundled parser)
+- byte 31: event count (2–70 accepted by the bundled parser)
 - byte 32 onward: 5-byte events
-- checksum directly after the final event
+- checksum directly after the final event; only byte 31 and the event bytes participate
+
+For `n` events, byte `32 + 5*n` is chosen so bytes `31..32+5*n` inclusive sum to `0x55` modulo 256. Name length, name bytes and unused header padding are **excluded**. Both DLL encoder and decoder use the same range. The earlier whole-header checksum in this project was incorrect. Editing retains opaque padding and bytes beyond the new checksum. Inputs outside the supported event-count range are rejected rather than silently truncated.
 
 Event layout:
 
@@ -208,7 +213,7 @@ Event layout:
 
 ### Shortcut slot
 
-There are 16 slots of 32 bytes beginning at `0x0100`. The recovered layout is a count byte followed by compact 3-byte events and a checksum.
+There are 16 slots of 32 bytes beginning at `0x0100`. The recovered layout is a count byte (2–6 accepted events) followed by compact 3-byte events and a checksum. Unlike macros, the checksum starts at byte 0 and includes the count.
 
 The exact macro **repeat-policy** binding bits are still being validated. Macro event content itself round-trips in deterministic tests.
 
@@ -218,7 +223,7 @@ The DPI indicator has scalar mode/brightness/speed/state records.
 
 The decorative light bar begins at `0x00A0`: six data bytes + checksum followed by an idle-time parity pair. The UI exposes mode, brightness, speed, RGB and idle light-off time.
 
-Receiver indicator/RGB uses dedicated opcodes rather than profile flash.
+Receiver indicator/RGB uses dedicated opcodes rather than profile flash. Indicator `0x2C/0x2D` carries three independent LED assignments in body bytes 5–7. The UI edits one at a time, preserving the other two. Enum names and physical behavior remain candidates; see [F1_AIR_ADVANCED.md](F1_AIR_ADVANCED.md).
 
 ## Pairing and power
 
