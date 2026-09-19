@@ -31,6 +31,7 @@ try {
     const pair = (addr, value) => { bytes[addr] = value; bytes[addr + 1] = (0x55 - value) & 255; };
     for (const addr of [0,2,4,6,8,10,0x4c,0x4e,0x50,0x52,0xa9,0xab,0xad,0xaf,0xb1,0xb3,0xb5,0xb7,0xb9]) pair(addr, 0);
     pair(0, 4); pair(2, 6); pair(4, 2); pair(10, 1);
+    pair(6, 30); pair(8, 1); pair(0xbd, 0xe2); pair(0xbf, 1); pair(0xe1, 0);
     for (let slot = 0; slot < 8; slot++) {
       const dpi = [1200, 2400, 3800, 5600, 8000, 60000, 400, 800][slot] - 1;
       const addr = 0x1b00 + slot * 6;
@@ -57,7 +58,8 @@ try {
             response.set(request.slice(2,5),2); response.set(bytes.slice(addr,addr+length),5); break;
           }
           case 0x12: case 0x1d: case 0xb3: response.set([5,2],5); break;
-          case 0x17: case 0x2b: case 0x19: case 0x2d: break;
+          case 0x2d: response.set([0xfe, 2, 1], 5); break;
+          case 0x17: case 0x2b: case 0x19: break;
           default: throw new Error(`Unexpected write opcode ${request[0]}`);
         }
         response[15]=(0x4d-response.slice(0,15).reduce((a,b)=>a+b,0))&255;
@@ -82,8 +84,24 @@ try {
   assert.equal(await page.locator('#lod-raw option').count(), 5);
   assert.equal(await page.locator('#lod-raw').inputValue(), '1');
   assert.equal(await page.locator('.dpi-stage').count(), 6);
+  assert.equal(await page.locator('#sensor-rotation').inputValue(), '-30');
+  assert.equal(await page.locator('#scan-20k').isChecked(), false);
   await page.locator('label.switch').filter({ has: page.locator('#scan-20k') }).click();
   await page.getByText('Candidate or unknown scalar writes require Expert writes.', { exact: true }).waitFor();
+  await page.locator('[data-tab="lighting"]').click();
+  assert.equal(await page.locator('[data-save-receiver-led]').count(), 3);
+  assert.equal(await page.locator('[data-save-receiver-led="0"]').isDisabled(), true);
+  await page.locator('#read-receiver-led').click();
+  await page.waitForFunction(() => !document.querySelector('[data-save-receiver-led="0"]').disabled);
+  assert.equal(await page.locator('#receiver-led-0').inputValue(), '254');
+  assert.match(await page.locator('#receiver-led-0 option:checked').textContent(), /Keep unknown/);
+  assert.equal(await page.locator('#receiver-led-1').inputValue(), '2');
+  assert.equal(await page.locator('#receiver-led-2').inputValue(), '1');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'receiver controls fit a narrow viewport');
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await mkdir('captures', { recursive: true });
+  await page.screenshot({ path: 'captures/receiver-browser-smoke.png', fullPage: true });
   await page.locator('[data-tab="diagnostics"]').click();
   await page.locator('#probe-versions').click();
   await page.waitForFunction(() => !document.querySelector('#export-endpoints').disabled);

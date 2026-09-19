@@ -106,14 +106,15 @@ test('shortcut compact events round-trip', () => {
 
 test('macro and shortcut editing preserve opaque padding and bytes beyond the new checksum', () => {
   const original = new Uint8Array(384).fill(0xa5);
-  const encoded = encodeMacro({ name: 'X', events: [] }, { original });
+  const events = [{ kind: 'key-down', code: 1, usage: 4 }, { kind: 'key-up', code: 1, usage: 4 }];
+  const encoded = encodeMacro({ name: 'X', events }, { original });
   assert.deepEqual(encoded.slice(2, 31), original.slice(2, 31));
-  assert.deepEqual(encoded.slice(33), original.slice(33));
+  assert.deepEqual(encoded.slice(43), original.slice(43));
   assert.equal(decodeMacro(encoded).valid, true);
   assert.equal(decodeMacro(encoded).name, 'X');
   const shortcutOriginal = new Uint8Array(32).fill(0x5a);
-  const shortcut = encodeShortcut([], { original: shortcutOriginal });
-  assert.deepEqual(shortcut.slice(2), shortcutOriginal.slice(2));
+  const shortcut = encodeShortcut(events, { original: shortcutOriginal });
+  assert.deepEqual(shortcut.slice(8), shortcutOriginal.slice(8));
   assert.equal(decodeShortcut(shortcut).valid, true);
 });
 

@@ -31,7 +31,7 @@ Comparison refuses differing device identities, profiles, region sets or ranges.
 ## Experiments still needed
 
 - Dynamic Sensitivity: deferred. The owner reports no such control in the current official UI. Classic/Natural/Jump/Custom are shared resource strings, not proof of F1 AIR support. Only revisit this experiment if the control is actually observed on F1 AIR; no firmware update or raw write is justified to try to expose it.
-- Sensor controls: choose one visible control (for example motion sync, ripple or angle snapping) and capture one transition per pair. Skip controls absent from the official UI. LOD can also be used to check the capture workflow against its already-verified mapping.
+- Sensor controls: choose one visible control and capture one transition per pair. The supplied Windows screenshots establish angle and 20K scan controls. Static traces predict angle changes at `0xBD/0xBF` and 20K at `0xE1`, replacing the old `0x0006/0x0008` guesses; hardware captures are still needed. LOD can check the workflow against its already-verified mapping.
 - Macro repeat: keep identical events and name; change only repeat policy. Capture **both Buttons and Macros** before and after. Export each baseline before switching presets. Do not assume repeat bits reside only in the macro slot.
 - Mouse lighting: one effect/color/state change at a time using Lighting.
 - Receiver lighting: use **Read receiver lighting → Export endpoint JSON** before and after one official change. This captures `0x2D` and `0x19`; receiver state does not live in the flash Lighting preset. Compare endpoint bodies separately, retaining errors as errors.

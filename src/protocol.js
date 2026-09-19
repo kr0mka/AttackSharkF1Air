@@ -313,11 +313,13 @@ export class CompXDevice extends EventTarget {
 
   async getReceiverIndicator() {
     const response = await this.command(OPCODE.GET_RECEIVER_INDICATOR);
-    return { mode: response[5], arg1: response[6], arg2: response[7], raw: response };
+    return { assignments: [...response.slice(5, 8)], raw: response };
   }
 
-  async setReceiverIndicator(mode, arg1 = 0, arg2 = 0) {
-    const request = rawCommandBody(OPCODE.SET_RECEIVER_INDICATOR, [mode, arg1, arg2], { marker: 0x0a });
+  async setReceiverIndicator(assignments) {
+    const bytes = validateBytes(assignments);
+    if (bytes.length !== 3) throw new Error('Receiver indicator requires exactly three assignment bytes.');
+    const request = rawCommandBody(OPCODE.SET_RECEIVER_INDICATOR, bytes, { marker: 0x0a });
     await this.send(request, 'set receiver indicator');
   }
 

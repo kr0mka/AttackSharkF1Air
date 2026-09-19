@@ -7,7 +7,6 @@ import {
   DPI_LIGHT_MODES,
   MACRO_MOUSE_EVENTS,
   POLLING_RATE_TO_RAW,
-  RECEIVER_INDICATOR_MODES,
   SENSOR_MODES,
   SLEEP_CODES,
 } from './constants.js';
@@ -17,6 +16,7 @@ import { MouseModel } from './device-model.js';
 import { createCaptureLabState, renderCaptureLab, bindCaptureLab } from './ui/capture-lab.js';
 import { lodOptions as renderLodOptions, physicalButtons } from './ui/f1-controls.js';
 import { captureEndpoints } from './protocol/endpoints.js';
+import { renderReceiverLighting } from './ui/receiver-lighting.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -49,6 +49,7 @@ const app = {
   shortcutDraft: [],
   firmwareInspection: null,
   endpointCapture: null,
+  receiverIndicator: null,
 };
 
 function esc(value) {
@@ -206,8 +207,7 @@ function renderSensor() {
   const lodOptions = renderLodOptions(s.lodRaw);
   const sensorModes = Object.entries(SENSOR_MODES).filter(([value]) => Number(value) < 256).map(([value,label]) => `<option value="${value}" ${selected(value,s.sensorMode)}>${esc(label)}</option>`).join('');
   const sleepOptions = SLEEP_CODES.map((x) => `<option value="${x.raw}" ${selected(x.raw,s.performanceTime)}>${x.label}</option>`).join('');
-  const rotationRaw = s.sensorRotationRaw ?? (model.base?.[6] ?? 0);
-  const rotation = rotationRaw;
+  const rotation = s.sensorRotationDegrees;
   return `${pageHead('Performance', 'Sensor', 'DPI, report rate and PAW3955 onboard sensor features. Exact DPI uses the F1 AIR high-resolution table recovered from the bundled driver.')}
     <div class="card">
       <div class="card-head"><div><h3>DPI stages</h3><p>F1 AIR profile: 1–60,000 DPI in 1-DPI increments. The exact high-resolution table and legacy table are updated together.</p></div><div class="control" style="min-width:130px"><label>Enabled stages</label><select id="stage-count" data-write>${Array.from({length:8},(_,i)=>`<option value="${i+1}" ${selected(i+1,s.stageCount)}>${i+1}</option>`).join('')}</select></div></div>
@@ -221,8 +221,8 @@ function renderSensor() {
           <div class="setting-row"><div class="setting-copy"><b>Debounce</b><small>Lower values reduce click delay but can expose switch chatter.</small></div><div class="inline" style="gap:8px"><input id="debounce" type="range" min="0" max="15" value="${s.debounce ?? 1}" data-write><span class="mono" id="debounce-label">${s.debounce ?? 1} ms</span></div></div>
           <div class="setting-row"><div class="setting-copy"><b>Sensor mode</b><small>“Corded / auto high-rate” is entered automatically by firmware and is not a byte-stored selectable value.</small></div><select id="sensor-mode" data-write>${sensorModes}</select></div>
           <div class="setting-row"><div class="setting-copy"><b>Lift-off distance (LOD)</b><small>Verified F1 AIR levels: 0.7, 0.9, 1.2, 1.4 and 1.6 mm.</small></div><select id="lod-raw" data-write>${lodOptions}</select></div>
-          <div class="setting-row"><div class="setting-copy"><b>Sensor rotation</b><small>Candidate raw byte at 0x0006. Angle units and signed encoding are unproven; Expert writes required.</small></div><div class="inline" style="gap:8px"><input id="sensor-rotation" type="number" min="0" max="255" value="${rotation}"><button class="button tiny" id="save-rotation" data-write>Save</button></div></div>
-          <div class="setting-row"><div class="setting-copy"><b>20K FPS scanning</b><small>Candidate at 0x0008; On/Off semantics need capture verification. Expert writes required.</small></div><label class="switch"><input id="scan-20k" type="checkbox" ${checked(Boolean(s.sensorStaticScan))} data-write><span class="switch-track"></span><span class="switch-text">${s.sensorStaticScan ? 'On' : 'Off'}</span></label></div>
+          <div class="setting-row"><div class="setting-copy"><b>Mouse angle (degrees)</b><small>−30° to +30°. Desktop trace: 0x00BD / 0x00BF. Save uses the desktop application sequence. Expert writes required; hardware verification pending. ${rotation == null ? `Unknown or invalid raw angle: ${s.sensorRotationRaw ?? 'unavailable'}.` : ''}</small></div><div class="inline" style="gap:8px"><input id="sensor-rotation" type="number" min="-30" max="30" step="1" value="${rotation ?? ''}" placeholder="Degrees"><button class="button tiny" id="save-rotation" data-write>Save</button></div></div>
+          <div class="setting-row"><div class="setting-copy"><b>20K FPS scanning</b><small>Desktop trace: 0x00E1, Off = 0 / On = 1. Expert writes required; hardware verification pending.</small></div><label class="switch"><input id="scan-20k" type="checkbox" ${checked(s.sensorStaticScan === 1)} data-write><span class="switch-track"></span><span class="switch-text">${s.sensorStaticScan === 1 ? 'On' : s.sensorStaticScan === 0 ? 'Off' : 'Unknown'}</span></label></div>
         </div>
       </div>
       <div class="card">
@@ -329,20 +329,20 @@ function renderMacros() {
       <div class="card">
         <div class="card-head"><div><h3>Macro ${app.selectedMacroSlot+1}</h3><p>${app.macroLoaded ? `Decoded ${app.macroDraft.events.length} events.` : 'Load the slot before editing so existing data is preserved.'}</p></div><div class="button-row"><button class="button tiny" id="load-macro">Load slot</button><button class="button tiny ${app.macroRecording?'active':''}" id="record-macro" ${app.macroLoaded?'':'disabled'}>${app.macroRecording?'Stop recording':'Record keys'}</button><button class="button tiny primary" id="save-macro" data-write ${app.macroLoaded?'':'disabled'}>Save</button></div></div>
         <div class="control"><label>Macro name</label><input id="macro-name" type="text" maxlength="30" value="${attr(app.macroDraft.name)}" ${app.macroLoaded?'':'disabled'}></div>
-        <div class="between" style="margin:14px 0 7px"><div class="control-label">Events · 5 bytes each · max 70</div><div class="button-row"><select id="mouse-event">${mouseOptions}</select><button class="button tiny" id="add-mouse-event" ${app.macroLoaded?'':'disabled'}>Add mouse event</button><button class="button tiny" id="add-key-event" ${app.macroLoaded?'':'disabled'}>Add raw key</button></div></div>
+        <div class="between" style="margin:14px 0 7px"><div class="control-label">Events · 5 bytes each · 2–70 required</div><div class="button-row"><select id="mouse-event">${mouseOptions}</select><button class="button tiny" id="add-mouse-event" ${app.macroLoaded?'':'disabled'}>Add mouse event</button><button class="button tiny" id="add-key-event" ${app.macroLoaded?'':'disabled'}>Add raw key</button></div></div>
         <div class="event-list" id="event-list">${renderMacroEvents()}</div>
         <div class="notice info" style="margin-top:14px">Loop/repeat policy in the vendor UI is not part of the recovered 384-byte event record itself; it appears to be encoded with the button-to-macro assignment. Until a F1 AIR capture verifies those parameter bits, this editor preserves macro content but does not invent a loop-policy encoding.</div>
       </div>
     </div>
     <div class="grid two" style="margin-top:14px">
-      <div class="card"><div class="card-head"><div><h3>Shortcut / combo slot</h3><p>Short chord records used by button action type 5.</p></div></div>
+      <div class="card"><div class="card-head"><div><h3>Shortcut / combo slot</h3><p>Short chord records used by button action type 5. Requires 2–6 events.</p></div></div>
         <div class="inline" style="gap:7px"><select id="shortcut-slot">${Array.from({length:16},(_,i)=>`<option value="${i}">Slot ${i+1}</option>`).join('')}</select><button class="button" id="load-shortcut">Load</button><button class="button primary" id="save-shortcut" data-write>Save raw</button></div>
         <div class="control" style="margin-top:10px"><label>Decoded / editable JSON events</label><textarea id="shortcut-json" rows="9">${esc(JSON.stringify(app.shortcutDraft,null,2))}</textarea></div>
       </div>
       <div class="card"><div class="card-head"><div><h3>Format notes</h3><p>Useful while validating captures against the vendor app.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Region</th><th>Address</th><th>Size</th><th>Integrity</th></tr></thead><tbody>
           <tr><td>Shortcut slot</td><td>0x0100 + n×0x20</td><td>32 B</td><td>0x55 checksum</td></tr>
-          <tr><td>Macro slot</td><td>0x0300 + n×0x180</td><td>384 B</td><td>0x55 checksum after last event</td></tr>
+          <tr><td>Macro slot</td><td>0x0300 + n×0x180</td><td>384 B</td><td>Count + events + checksum sum to 0x55</td></tr>
           <tr><td>Macro event</td><td>slot + 32</td><td>5 B</td><td>type/data/data/delay BE16</td></tr>
         </tbody></table></div>
       </div>
@@ -376,11 +376,7 @@ function renderLighting() {
         </div><div class="button-row" style="justify-content:flex-end;margin-top:12px"><button class="button primary" id="save-lightbar" data-write>Apply light bar</button></div>
       </div>
     </div>
-    <div class="card" style="margin-top:14px">
-      <div class="card-head"><div><h3>8K receiver indicator</h3><p>Read current state first. Assignment labels are candidates; writing raw receiver fields requires Expert writes.</p></div><button class="button" id="read-receiver-led">Read receiver</button></div>
-      <div class="inline" style="gap:8px;max-width:720px"><select id="receiver-mode">${RECEIVER_INDICATOR_MODES.map(x=>`<option value="${x.raw}">Candidate: ${x.label}</option>`).join('')}</select><input id="receiver-arg1" type="number" min="0" max="255" value="0" title="raw arg1"><input id="receiver-arg2" type="number" min="0" max="255" value="0" title="raw arg2"><button class="button primary" id="save-receiver-led" data-write>Apply</button></div>
-      <div id="receiver-readout" class="raw" style="margin-top:10px">Not read yet.</div>
-    </div>`;
+    ${renderReceiverLighting(app.receiverIndicator)}`;
 }
 
 function renderProfiles() {
@@ -481,8 +477,8 @@ function bindSensor() {
   writePairControl('#ripple',ADDRESS.RIPPLE,(v)=>v?1:0);
   writePairControl('#highest-performance',ADDRESS.PERFORMANCE_STATE,(v)=>v?1:0);
   writePairControl('#performance-time',ADDRESS.PERFORMANCE_TIME,(v)=>Number(v));
-  writePairControl('#scan-20k',ADDRESS.SENSOR_STATIC_SCAN,(v)=>v?1:0);
-  $('#save-rotation')?.addEventListener('click',()=>run(()=>model.writePair(0x0006,Number($('#sensor-rotation').value)),{write:true,success:'Experimental sensor rotation byte saved'}));
+  writePairControl('#scan-20k',ADDRESS.SCAN_20K,(v)=>v?1:0);
+  $('#save-rotation')?.addEventListener('click',()=>run(()=>model.setSensorAngle($('#sensor-rotation').valueAsNumber),{write:true,success:'Experimental mouse angle saved'}));
 }
 
 function bindButtons() {
@@ -545,8 +541,13 @@ function bindLighting() {
   $('#save-dpi-light')?.addEventListener('click',()=>run(()=>model.setDpiEffect({mode:Number($('#dpi-light-mode').value),brightness:Number($('#dpi-light-brightness').value),speed:Number($('#dpi-light-speed').value),state:$('#dpi-light-state').checked?1:0}),{write:true,success:'DPI lighting saved'}));
   $('#save-lightbar')?.addEventListener('click',()=>run(()=>model.setLightBar({mode:Number($('#lightbar-mode').value),brightness:Number($('#lightbar-brightness').value),speed:Number($('#lightbar-speed').value),color:$('#lightbar-color').value,offTime:Number($('#lightbar-offtime').value)}),{write:true,success:'Light bar saved'}));
   writePairControl('#moving-light-off',ADDRESS.MOVING_LIGHT_OFF,(v)=>v?1:0);
-  $('#read-receiver-led')?.addEventListener('click',()=>run(async()=>{ const value=await model.getReceiverIndicator(); $('#receiver-mode').value=String(value.mode); $('#receiver-arg1').value=String(value.arg1); $('#receiver-arg2').value=String(value.arg2); $('#receiver-readout').textContent=`mode=${value.mode}, arg1=${value.arg1}, arg2=${value.arg2} · ${hex(value.raw)}`; },{rerender:false,success:'Receiver indicator read'}));
-  $('#save-receiver-led')?.addEventListener('click',()=>run(async()=>{ const value=await model.setReceiverIndicator(Number($('#receiver-mode').value),Number($('#receiver-arg1').value),Number($('#receiver-arg2').value)); toast(`Receiver read-back: mode ${value.mode}`,'success'); },{write:true,rerender:false}));
+  $('#read-receiver-led')?.addEventListener('click',()=>run(async()=>{ app.receiverIndicator=null; app.receiverIndicator=await model.getReceiverIndicator(); },{success:'Receiver assignments read'}));
+  $$('[data-save-receiver-led]').forEach((button)=>button.addEventListener('click',()=>run(async()=>{
+    const index=Number(button.dataset.saveReceiverLed);
+    const value=Number($(`#receiver-led-${index}`).value);
+    app.receiverIndicator=null;
+    app.receiverIndicator=await model.setReceiverIndicator(index,value);
+  },{write:true,success:'Receiver assignment verified by read-back'})));
 }
 
 async function pairFlow() {
@@ -634,7 +635,7 @@ firmwareFile.addEventListener('change',async()=>{
 
 expertWrites.addEventListener('change',()=>{model.expertWrites=expertWrites.checked; if(expertWrites.checked)toast('Expert writes enabled for unverified devices and candidate fields.');});
 
-hid.addEventListener('disconnected',()=>{model.identity=null;model.base=null;model.settings=null;model.highResDpi=[];model.macros.clear();model.shortcuts.clear();model.expertWrites=false;expertWrites.checked=false;app.macroLoaded=false;render();});
+hid.addEventListener('disconnected',()=>{model.identity=null;model.base=null;model.settings=null;model.highResDpi=[];model.macros.clear();model.shortcuts.clear();model.expertWrites=false;expertWrites.checked=false;app.macroLoaded=false;app.receiverIndicator=null;render();});
 navigator.hid?.addEventListener?.('disconnect',(event)=>{if(hid.device===event.device){hid.close().catch(()=>{});}});
 
 if (!('hid' in navigator)) $('#unsupported-browser').classList.remove('hidden');
