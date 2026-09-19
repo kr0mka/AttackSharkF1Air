@@ -18,7 +18,7 @@
 | Motion sync | Implemented | onboard setting |
 | 20K FPS scan | Experimental | address/layout recovered; semantic values need hardware confirmation |
 | Mouse rotation / angle mode | Experimental | raw byte path available; physical-angle mapping not yet proven |
-| Dynamic Sensitivity presets/custom curve | Preserved / diagnostic | record structures recovered; semantic byte mapping not guessed |
+| Dynamic Sensitivity presets/custom curve | Availability unconfirmed | shared resources only; owner reports no control in current official UI; advanced bytes remain semantically unassigned |
 | Five physical button remaps | Implemented | sixth logical firmware slot preserved, hidden from physical UI |
 | DPI/polling/profile/light actions | Implemented | vendor action IDs |
 | Firepower | Experimental | UI limits known; binding parameter still needs a capture |

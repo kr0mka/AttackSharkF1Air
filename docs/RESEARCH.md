@@ -63,7 +63,7 @@ The English language resource establishes the vendor feature surface and many ra
 - ripple, angle snap, motion sync;
 - 20K FPS static scanning;
 - mouse-angle mode;
-- Dynamic Sensitivity presets Classic / Natural / Jump / Custom;
+- shared Dynamic Sensitivity labels Classic / Natural / Jump / Custom; their presence does not establish F1 AIR availability;
 - sleep and long-distance mode;
 - receiver pairing instructions;
 - DPI/decorative lighting labels;
@@ -124,7 +124,7 @@ The current official web UI was also captured exposing the five F1 AIR LOD choic
 | 5-level F1 LOD raw mapping | verified | five physical levels |
 | sensor rotation semantics at `0x0006` | unresolved | explicitly experimental |
 | 20K scan semantics at `0x0008` | medium | explicitly experimental |
-| Dynamic Sensitivity byte meanings | unresolved | preserve/show raw records |
+| Dynamic Sensitivity availability and byte meanings | unconfirmed; absent in owner-reported UI | defer experiment; preserve advanced raw records without assigning this feature |
 | firepower parameter bits | medium-low | explicitly experimental |
 | macro repeat-policy binding bits | unresolved | not guessed |
 | firmware bootloader transfer | unresolved | flashing disabled |
@@ -135,8 +135,8 @@ A real F1 AIR connected to the official driver can resolve the remaining user-fa
 
 1. use Sensor captures to verify each processing control independently (LP/HP, motion sync, ripple, angle snapping, 20K scan);
 2. bind one known macro using each repeat policy and compare only its four-byte button record;
-3. change Dynamic Sensitivity Off/Classic/Natural/Jump and compare `0xBD..0xE7`;
-4. for Custom Dynamic Sensitivity, move one graph point at a time and compare the same range;
+3. only if Dynamic Sensitivity is actually exposed on F1 AIR, compare individual mode changes across the full base block; no particular address is established;
+4. only after confirming such a control exists, change one custom curve point per capture; currently deferred because the owner reports no Dynamic Sensitivity control;
 5. change mouse rotation by a few known angles and compare `0x0006` plus the advanced range.
 
 The project's Diagnostics tab and `tools/webhid-sniffer.js` exist specifically for these captures.
@@ -153,3 +153,10 @@ The resource has two different receiver indication lists: one includes off/polli
 `Config.ini` MID 20 advertises six enabled stages and six stored key records. Its raw defaults are not a replacement for the hardware-captured physical-button map. MID 21 advertises a 52,000 upper DPI limit in the installed package, so package membership alone is insufficient to grant the MID 20 write policy.
 
 Current remaining evidence gate: collect one-setting F1 AIR captures. Browser fixtures are synthetic regression data and do not prove Dynamic Sensitivity, lighting, repeat policy or firmware semantics. Firmware flashing remains disabled.
+
+
+### Owner correction: feature availability
+
+The owner reports that Dynamic Sensitivity is not visible anywhere in their current official UI. The earlier Classic → Natural capture recommendation incorrectly promoted a shared resource label into an expected F1 AIR control. Availability remains unconfirmed; this is not evidence of a hidden feature, a required firmware update, or a known mapping at `0xBD..0xE7`.
+
+The installed MID 20 profile contains an `Adveanced=0,2` entry, but its numeric meanings are not established here. The PAW3955 capability header lists sensor-mode selection, LOD, ripple, angle/fix-line and motion sync; it does not establish Dynamic Sensitivity support. Capture work should use controls actually visible on the device, with the advanced bytes retained for future evidence.
