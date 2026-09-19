@@ -37,7 +37,7 @@ These hashes exist only to make future research reproducible; the binaries thems
 - CID `124`
 - 18 profile variants
 - F1-era PAW3955 entries with MIDs `19..22`
-- six physical button records
+- six stored button records; only five are physical F1 AIR controls
 
 The PAW3955 profile data advertises a 60K DPI range and high-resolution flag `0x11`.
 
@@ -102,9 +102,9 @@ A live F1 AIR connected through the 8K receiver identified itself as:
 
 The high-resolution table at `0x1B00` established an important F1-specific detail: the 16-bit PAW3955 value is stored as **DPI - 1**. For example, stage 3 returned `D7 0E` (`0x0ED7 = 3799`) while the configured value is 3800 DPI. Other captures line up the same way (`AF 04` = 1199 -> 1200, `5F 09` = 2399 -> 2400, etc.). The writer therefore subtracts one and the decoder adds one.
 
-The same session showed that sending battery/version/profile/range requests concurrently causes the receiver to answer only a subset of them. The vendor DLL serializes exchanges; the open transport now does the same so only one request/response transaction is outstanding at a time. Wireless mouse firmware is queried with the vendor DLL's slave-version opcode `0xB3`, while receiver firmware remains `0x1D`.
+The same session showed that sending battery/version/profile/range requests concurrently causes the receiver to answer only a subset of them. The vendor DLL serializes exchanges; the open transport now does the same so only one request/response transaction is outstanding at a time. The wireless slave-version endpoint is queried with `0xB3`, while receiver firmware remains `0x1D`. The official mouse firmware display can differ from `0xB3` and remains unresolved.
 
-The current official web UI was also captured exposing the five F1 AIR LOD choices: **0.7, 0.9, 1.2, 1.4 and 1.6 mm**. Their raw-byte mapping is still deliberately unresolved: the connected mouse currently reports raw `1`, but a single-setting capture for each option is needed before assigning labels to raw values.
+The current official web UI was also captured exposing the five F1 AIR LOD choices: **0.7, 0.9, 1.2, 1.4 and 1.6 mm**. Subsequent controlled captures verified raw 1–5 in that order; see [F1_AIR_LOD.md](F1_AIR_LOD.md).
 
 ## Confidence ledger
 
@@ -112,7 +112,7 @@ The current official web UI was also captured exposing the five F1 AIR LOD choic
 |---|---|---|
 | HID report framing/checksum | high | normal UI |
 | flash read/write + read-back | high | normal UI |
-| F1 CID/MID identity gate | high | normal UI |
+| F1 CID/MID identity gate | MID 20 verified; other MIDs candidates | normal writes limited to MID 20 |
 | polling rate | high | normal UI |
 | PAW3955 exact DPI table | high | normal UI |
 | button record format | high | normal UI |
@@ -120,8 +120,8 @@ The current official web UI was also captured exposing the five F1 AIR LOD choic
 | shortcut storage | medium-high | normal UI, raw JSON available |
 | debounce/motion/angle/ripple/sleep/performance/sensor mode | high | normal UI |
 | light-bar record structure | medium-high | normal UI |
-| receiver indicator commands | medium-high | normal UI + raw args |
-| 5-level F1 LOD raw mapping | unresolved | raw value only |
+| receiver indicator commands | structure known; semantics candidate | read-only capture; Expert writes |
+| 5-level F1 LOD raw mapping | verified | five physical levels |
 | sensor rotation semantics at `0x0006` | unresolved | explicitly experimental |
 | 20K scan semantics at `0x0008` | medium | explicitly experimental |
 | Dynamic Sensitivity byte meanings | unresolved | preserve/show raw records |
@@ -133,10 +133,23 @@ The current official web UI was also captured exposing the five F1 AIR LOD choic
 
 A real F1 AIR connected to the official driver can resolve the remaining user-facing semantics with **single-change captures**:
 
-1. dump base settings, change exactly one LOD level, dump again; repeat for all five levels;
+1. use Sensor captures to verify each processing control independently (LP/HP, motion sync, ripple, angle snapping, 20K scan);
 2. bind one known macro using each repeat policy and compare only its four-byte button record;
 3. change Dynamic Sensitivity Off/Classic/Natural/Jump and compare `0xBD..0xE7`;
 4. for Custom Dynamic Sensitivity, move one graph point at a time and compare the same range;
 5. change mouse rotation by a few known angles and compare `0x0006` plus the advanced range.
 
 The project's Diagnostics tab and `tools/webhid-sniffer.js` exist specifically for these captures.
+
+
+## Installed-reference recheck (2026-09-19)
+
+Read-only inspection of `C:\Program Files (x86)\ATTACK SHARK MOUSE HUB` confirmed both EXE/DLL SHA-256 hashes above. Neither binary was run or loaded.
+
+`Language/en.json` contains Dynamic Sensitivity UI option IDs Custom=0, Classic=1, Natural=2, Jump=3. These are resource IDs, **not established flash values**. No address, scaling, mode bits or curve coefficients have been promoted from them.
+
+The resource has two different receiver indication lists: one includes off/polling/battery/connection-quality/DPI; another describes polling/battery/low-battery-warning. In particular, value 3 has different descriptions across lists. The applicable list, fields and receiver RGB relationship need controlled `0x2D`/`0x19` captures; no new semantic enum is inferred.
+
+`Config.ini` MID 20 advertises six enabled stages and six stored key records. Its raw defaults are not a replacement for the hardware-captured physical-button map. MID 21 advertises a 52,000 upper DPI limit in the installed package, so package membership alone is insufficient to grant the MID 20 write policy.
+
+Current remaining evidence gate: collect one-setting F1 AIR captures. Browser fixtures are synthetic regression data and do not prove Dynamic Sensitivity, lighting, repeat policy or firmware semantics. Firmware flashing remains disabled.

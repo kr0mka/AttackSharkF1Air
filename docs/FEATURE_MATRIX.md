@@ -4,14 +4,14 @@
 |---|---|---|
 | Device connect / status | Implemented | WebHID, F1 identity gate |
 | Battery / charging voltage | Implemented | live device command |
-| Mouse / receiver firmware version | Implemented | read-only |
+| Version endpoints | Read-only | exports 0x12 / 0x1D / 0xB3; vendor v5.23 vs 0xB3 v5.02 unresolved |
 | DPI stage count / active stage | Implemented | 1–8 stages |
 | DPI 1–60,000 / 1-step | Implemented | PAW3955 high-resolution table |
 | DPI stage colors | Implemented | onboard records |
 | Polling 125–8000 Hz | Implemented | wired/wireless device dependent |
 | Debounce | Implemented | onboard scalar |
 | LP / HP sensor mode | Implemented | corded-auto is not written as an invented byte |
-| LOD | Partial | raw byte editable; five F1 physical-level values need capture mapping |
+| LOD | Verified | raw 1–5 = 0.7 / 0.9 / 1.2 / 1.4 / 1.6 mm |
 | Highest performance + timer | Implemented | onboard settings |
 | Ripple control | Implemented | onboard setting |
 | Angle snap | Implemented | onboard setting |
@@ -19,7 +19,7 @@
 | 20K FPS scan | Experimental | address/layout recovered; semantic values need hardware confirmation |
 | Mouse rotation / angle mode | Experimental | raw byte path available; physical-angle mapping not yet proven |
 | Dynamic Sensitivity presets/custom curve | Preserved / diagnostic | record structures recovered; semantic byte mapping not guessed |
-| Six button remaps | Implemented | standard + Attack Shark special actions |
+| Five physical button remaps | Implemented | sixth logical firmware slot preserved, hidden from physical UI |
 | DPI/polling/profile/light actions | Implemented | vendor action IDs |
 | Firepower | Experimental | UI limits known; binding parameter still needs a capture |
 | Combo / shortcut slots | Implemented | 16 onboard slots |
@@ -28,13 +28,13 @@
 | Macro repeat policies | Partial | event content works; repeat-policy binding bits not guessed |
 | DPI indicator effects | Implemented | mode/brightness/speed/state |
 | Decorative light bar | Implemented | effect/brightness/speed/RGB/idle behavior |
-| Receiver indicator | Implemented | dedicated receiver command + raw args |
+| Receiver indicator | Candidate semantics | read-only probes and raw export; writes require Expert mode |
 | Receiver RGB | Protocol implemented | lower-level API available; UI can be extended once exact F1 semantics are confirmed |
 | Sleep time | Implemented | onboard setting |
 | Long-distance mode | Implemented | dedicated command |
 | Receiver pairing | Implemented | start + status |
 | Four onboard profiles | Implemented | dedicated profile command |
-| Export/import | Implemented | complete known-region JSON backup with CID check |
+| Export/import | Implemented | exact region and identity/profile validation; unknown bytes preserved, raw restore requires Expert writes |
 | Restore defaults | Implemented | vendor clear-setting command |
-| Raw diagnostics / packet log | Implemented | read-only expert tools |
+| Diagnostics capture/diff / live log | Implemented | seven presets, raw bytes, absolute addresses, confidence, JSON export/import, offline comparison |
 | Firmware update | Intentionally disabled | version/`.bin` inspection only until bootloader protocol is verified |

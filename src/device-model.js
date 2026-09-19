@@ -1,8 +1,10 @@
 import {
   ADDRESS,
+  ALL_PRODUCT_IDS,
   BASE_SETTINGS_SIZE,
   BUTTON_ACTIONS,
   BUTTON_COUNT,
+  PHYSICAL_BUTTON_COUNT,
   DEVICE_TYPE,
   DPI_STAGE_COUNT,
   F1_AIR_PROFILE,
@@ -31,13 +33,19 @@ import {
   encodeLightBar,
   encodeMacro,
   encodeShortcut,
-  fromBase64,
   hex,
   parityPair,
   toBase64,
 } from './codecs.js';
+import { fieldForAddress } from './protocol-map.js';
+import { restoreSpans, validateBackupRegions } from './protocol/backup.js';
 
 const pair = (base, address, fallback = null) => decodeParityPair(base.slice(address, address + 2), fallback);
+
+function integerInRange(value, min, max, name) {
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`);
+  return value;
+}
 
 function blockValid(bytes) {
   if (!bytes?.length) return false;
@@ -71,6 +79,7 @@ export class MouseModel extends EventTarget {
     this.macros = new Map();
     this.shortcuts = new Map();
     this.lastBackup = null;
+    this.expertWrites = false;
   }
 
   emit(type = 'change', detail = null) {
@@ -81,7 +90,9 @@ export class MouseModel extends EventTarget {
     return Boolean(
       this.identity &&
       this.identity.cid === F1_AIR_PROFILE.cid &&
-      F1_AIR_PROFILE.supportedMids.includes(this.identity.mid),
+      F1_AIR_PROFILE.verifiedMids.includes(this.identity.mid) &&
+      this.hid.device?.vendorId === F1_AIR_PROFILE.vendorId &&
+      ALL_PRODUCT_IDS.includes(this.hid.device?.productId),
     );
   }
 
@@ -99,6 +110,7 @@ export class MouseModel extends EventTarget {
     ]);
     this.identity = {
       ...handshake,
+      vendorId: this.hid.device?.vendorId ?? null,
       productId: this.hid.device?.productId ?? null,
       productName: this.hid.device?.productName ?? 'Attack Shark mouse',
       deviceTypeName: DEVICE_TYPE[handshake.deviceType] ?? `Type ${handshake.deviceType}`,
@@ -120,7 +132,10 @@ export class MouseModel extends EventTarget {
       this.hid.getBattery(), this.hid.getCurrentProfile(), this.hid.getLongRangeMode(),
     ]);
     if (battery.status === 'fulfilled') this.identity.battery = battery.value;
-    if (profile.status === 'fulfilled') this.identity.profile = profile.value;
+    if (profile.status === 'fulfilled') {
+      if (this.identity.profile !== profile.value) this.clearProfileCaches();
+      this.identity.profile = profile.value;
+    }
     if (longRange.status === 'fulfilled') this.identity.longRange = longRange.value;
     try { this.identity.rssi = await this.hid.getRssi(); } catch { this.identity.rssi = null; }
     this.emit();
@@ -192,6 +207,13 @@ export class MouseModel extends EventTarget {
   }
 
   async writePair(address, value) {
+    integerInRange(value, 0, 255, 'Setting value');
+    const field = fieldForAddress(address);
+    const pairAddresses = [0, 2, 4, 0xa, 0x4c, 0x4e, 0x50, 0x52, 0xa9, 0xab, 0xad, 0xaf, 0xb1, 0xb3, 0xb5, 0xb7, 0xb9];
+    if (!this.expertWrites && (!pairAddresses.includes(address) || !['verified', 'likely'].includes(field?.confidence))) {
+      throw new Error('Candidate or unknown scalar writes require Expert writes.');
+    }
+    if (address === ADDRESS.LOD && !this.expertWrites) integerInRange(value, 1, 5, 'Verified LOD value');
     await this.hid.writeFlash(address, parityPair(value));
     await this.refreshSettings();
   }
@@ -203,22 +225,24 @@ export class MouseModel extends EventTarget {
   }
 
   async setStageCount(count) {
-    const value = Math.max(1, Math.min(DPI_STAGE_COUNT, Number(count)));
+    const value = integerInRange(Number(count), 1, DPI_STAGE_COUNT, 'DPI stage count');
+    if (this.settings.currentStage >= value) await this.writePair(ADDRESS.CURRENT_DPI, value - 1);
     await this.writePair(ADDRESS.STAGE_COUNT, value);
   }
 
   async setCurrentDpiStage(index) {
-    await this.writePair(ADDRESS.CURRENT_DPI, Math.max(0, Math.min(DPI_STAGE_COUNT - 1, Number(index))));
+    await this.writePair(ADDRESS.CURRENT_DPI, integerInRange(Number(index), 0, this.settings.stageCount - 1, 'Enabled DPI stage'));
   }
 
   async setDpi(index, dpi) {
     const i = Number(index);
-    if (i < 0 || i >= DPI_STAGE_COUNT) throw new Error('DPI stage out of range.');
-    const value = Math.max(F1_AIR_PROFILE.dpi.min, Math.min(F1_AIR_PROFILE.dpi.max, Math.round(Number(dpi))));
+    integerInRange(i, 0, this.settings.stageCount - 1, 'Enabled DPI stage');
+    const value = integerInRange(Number(dpi), F1_AIR_PROFILE.dpi.min, F1_AIR_PROFILE.dpi.max, 'DPI');
     // The PAW3955 profile carries an exact 16-bit X/Y table at 0x1B00.
     // Preserve the stage's observed mode flag. Real F1 AIR captures use 0x00
     // for ordinary ranges and can retain 0x11 on a stage; >42K needs 0x11.
-    const existingFlag = this.highResDpi[i]?.parsed?.flag ?? 0;
+    const existingFlag = this.highResDpi[i]?.parsed?.flag;
+    if (existingFlag == null) throw new Error('Read a valid high-resolution DPI record before changing it.');
     const highResFlag = value > 42000 ? 0x11 : existingFlag;
     await this.hid.writeFlash(ADDRESS.HIGH_RES_DPI + i * 6, encodeHighResDpi(value, highResFlag));
     // Keep the legacy table coherent for firmware/UI paths which still consult it.
@@ -228,6 +252,7 @@ export class MouseModel extends EventTarget {
 
   async setDpiColor(index, color) {
     const i = Number(index);
+    integerInRange(i, 0, this.settings.stageCount - 1, 'Enabled DPI stage');
     await this.hid.writeFlash(ADDRESS.DPI_COLORS + i * 4, encodeDpiColor(color));
     await this.refreshSettings();
   }
@@ -244,7 +269,13 @@ export class MouseModel extends EventTarget {
 
   async setButton(index, type, param = 0) {
     const i = Number(index);
-    if (i < 0 || i >= BUTTON_COUNT) throw new Error('Button index out of range.');
+    integerInRange(i, 0, PHYSICAL_BUTTON_COUNT - 1, 'Physical button index');
+    integerInRange(type, 0, 255, 'Button type');
+    integerInRange(param, 0, 65535, 'Button parameter');
+    const existing = this.settings?.buttons[i];
+    if (existing?.type === type && existing.param === param) return;
+    const known = BUTTON_ACTIONS.some((action) => action.type === type && action.param === param) || (type === 5 && param < SHORTCUT_SLOT_COUNT);
+    if (!known && !this.expertWrites) throw new Error('Unverified button parameters (including macro repeat bindings) require Expert writes.');
     await this.hid.writeFlash(ADDRESS.BUTTONS + i * 4, encodeButtonAction(type, param));
     await this.refreshSettings();
   }
@@ -262,8 +293,9 @@ export class MouseModel extends EventTarget {
 
   async setMacroSlot(slot, macro) {
     const i = Number(slot);
-    if (i < 0 || i >= MACRO_SLOT_COUNT) throw new Error('Macro slot out of range.');
-    const raw = encodeMacro(macro);
+    integerInRange(i, 0, MACRO_SLOT_COUNT - 1, 'Macro slot');
+    const original = await this.hid.readFlash(ADDRESS.MACROS + i * MACRO_SLOT_SIZE, MACRO_SLOT_SIZE);
+    const raw = encodeMacro(macro, { original });
     await this.hid.writeFlash(ADDRESS.MACROS + i * MACRO_SLOT_SIZE, raw);
     this.macros.set(i, { raw, parsed: decodeMacro(raw) });
     this.emit();
@@ -271,6 +303,7 @@ export class MouseModel extends EventTarget {
 
   async getMacroSlot(slot, force = false) {
     const i = Number(slot);
+    integerInRange(i, 0, MACRO_SLOT_COUNT - 1, 'Macro slot');
     if (!force && this.macros.has(i)) return this.macros.get(i);
     const raw = await this.hid.readFlash(ADDRESS.MACROS + i * MACRO_SLOT_SIZE, MACRO_SLOT_SIZE);
     const result = { raw, parsed: decodeMacro(raw) };
@@ -280,8 +313,9 @@ export class MouseModel extends EventTarget {
 
   async setShortcutSlot(slot, events) {
     const i = Number(slot);
-    if (i < 0 || i >= SHORTCUT_SLOT_COUNT) throw new Error('Shortcut slot out of range.');
-    const raw = encodeShortcut(events);
+    integerInRange(i, 0, SHORTCUT_SLOT_COUNT - 1, 'Shortcut slot');
+    const original = await this.hid.readFlash(ADDRESS.SHORTCUTS + i * SHORTCUT_SLOT_SIZE, SHORTCUT_SLOT_SIZE);
+    const raw = encodeShortcut(events, { original });
     await this.hid.writeFlash(ADDRESS.SHORTCUTS + i * SHORTCUT_SLOT_SIZE, raw);
     this.shortcuts.set(i, { raw, parsed: decodeShortcut(raw) });
     this.emit();
@@ -289,6 +323,7 @@ export class MouseModel extends EventTarget {
 
   async getShortcutSlot(slot, force = false) {
     const i = Number(slot);
+    integerInRange(i, 0, SHORTCUT_SLOT_COUNT - 1, 'Shortcut slot');
     if (!force && this.shortcuts.has(i)) return this.shortcuts.get(i);
     const raw = await this.hid.readFlash(ADDRESS.SHORTCUTS + i * SHORTCUT_SLOT_SIZE, SHORTCUT_SLOT_SIZE);
     const result = { raw, parsed: decodeShortcut(raw) };
@@ -297,8 +332,10 @@ export class MouseModel extends EventTarget {
   }
 
   async setProfile(profile) {
-    await this.hid.setCurrentProfile(Math.max(0, Math.min(3, Number(profile))));
+    integerInRange(Number(profile), 0, 3, 'Profile');
+    await this.hid.setCurrentProfile(Number(profile));
     this.identity.profile = Number(profile);
+    this.clearProfileCaches();
     await new Promise((r) => setTimeout(r, 80));
     await this.refreshSettings();
   }
@@ -316,6 +353,7 @@ export class MouseModel extends EventTarget {
 
   async restoreFactory() {
     await this.hid.clearSettings();
+    this.clearProfileCaches();
     await new Promise((r) => setTimeout(r, 500));
     await this.refreshSettings();
   }
@@ -325,11 +363,14 @@ export class MouseModel extends EventTarget {
   }
 
   async setReceiverIndicator(mode, arg1 = 0, arg2 = 0) {
+    if (!this.expertWrites) throw new Error('Receiver indicator assignment semantics require Expert writes.');
+    for (const value of [mode, arg1, arg2]) integerInRange(value, 0, 255, 'Receiver value');
     await this.hid.setReceiverIndicator(mode, arg1, arg2);
     return this.getReceiverIndicator();
   }
 
   async createBackup({ includeMacros = true, includeShortcuts = true } = {}) {
+    const activeProfile = await this.hid.getCurrentProfile();
     const base = await this.hid.readFlash(0, BASE_SETTINGS_SIZE);
     const highRes = await this.hid.readFlash(ADDRESS.HIGH_RES_DPI, DPI_STAGE_COUNT * 6);
     const payload = {
@@ -341,7 +382,7 @@ export class MouseModel extends EventTarget {
         cid: this.identity?.cid,
         mid: this.identity?.mid,
       },
-      activeProfile: this.identity?.profile,
+      activeProfile,
       regions: {
         base: { address: 0, data: toBase64(base) },
         highResDpi: { address: ADDRESS.HIGH_RES_DPI, data: toBase64(highRes) },
@@ -355,26 +396,27 @@ export class MouseModel extends EventTarget {
       const raw = await this.hid.readFlash(ADDRESS.MACROS, MACRO_SLOT_COUNT * MACRO_SLOT_SIZE);
       payload.regions.macros = { address: ADDRESS.MACROS, data: toBase64(raw) };
     }
+    if (activeProfile !== await this.hid.getCurrentProfile()) throw new Error('Profile changed during backup; export again.');
+    this.validateBackup(payload);
     this.lastBackup = payload;
     return payload;
   }
 
   validateBackup(backup) {
-    if (backup?.schema !== 'attackshark-f1-airi-backup/v1') throw new Error('Unsupported backup schema.');
-    if (backup.identity?.cid != null && this.identity?.cid != null && backup.identity.cid !== this.identity.cid) {
-      throw new Error(`Backup CID ${backup.identity.cid} does not match connected CID ${this.identity.cid}.`);
-    }
-    if (!backup.regions?.base || !backup.regions?.highResDpi) throw new Error('Backup is missing required regions.');
+    return validateBackupRegions(backup, { ...this.identity, vendorId: this.hid.device?.vendorId, productId: this.hid.device?.productId });
   }
 
   async restoreBackup(backup) {
-    this.validateBackup(backup);
-    const order = ['base', 'highResDpi', 'shortcuts', 'macros'];
-    for (const name of order) {
-      const region = backup.regions?.[name];
-      if (!region) continue;
-      await this.hid.writeFlash(Number(region.address), fromBase64(region.data));
+    const regions = this.validateBackup(backup);
+    const expert = this.expertWrites;
+    if (backup.activeProfile !== await this.hid.getCurrentProfile()) throw new Error('Backup profile differs from active profile. Select the matching profile first.');
+    for (const region of regions) {
+      for (const span of restoreSpans(region, expert)) {
+        if (backup.activeProfile !== await this.hid.getCurrentProfile()) throw new Error('Profile changed during restore; stopped.');
+        await this.hid.writeFlash(span.address, span.bytes);
+      }
     }
+    this.clearProfileCaches();
     await this.refreshSettings();
   }
 
@@ -386,5 +428,11 @@ export class MouseModel extends EventTarget {
       settings: this.settings,
       highResDpi: this.highResDpi,
     };
+  }
+
+  clearProfileCaches() {
+    this.macros.clear();
+    this.shortcuts.clear();
+    this.emit('profilechange');
   }
 }

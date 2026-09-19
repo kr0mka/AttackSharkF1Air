@@ -56,7 +56,8 @@ For ordinary non-flash commands, payload starts at body byte 5 and body byte 4 i
 | `0x0A` | status changed |
 | `0x0E` | get active profile |
 | `0x0F` | set active profile |
-| `0x12` | mouse firmware version |
+| `0x12` | normal version endpoint |
+| `0xB3` | wireless slave-version endpoint; not proven to match vendor-displayed mouse firmware |
 | `0x16` | set long-range mode |
 | `0x17` | get long-range mode |
 | `0x18` | set receiver RGB |
@@ -66,11 +67,13 @@ For ordinary non-flash commands, payload starts at body byte 5 and body byte 4 i
 | `0x2C` | set receiver indicator |
 | `0x2D` | get receiver indicator |
 
-The handshake response exposes CID, MID and connection/device type. The application gates normal writes on the known F1 AIR CID/MID set.
+The handshake response exposes CID, MID and connection/device type. Normal writes require the evidenced USB identity, CID 124 and hardware-verified MID 20. Other package MIDs remain candidates.
 
 ## Flash access
 
-Read/write commands transfer at most 10 data bytes per HID report. The project performs writes in 10-byte chunks and then reads the complete written region back. A mismatch is treated as an error.
+Read/write commands transfer at most 10 data bytes per HID report. The project performs writes in 10-byte chunks and then reads the complete written region back. A mismatch is treated as an error. All sends share the transaction queue; checksum-invalid/short responses cannot satisfy a request. Flash reads also match address and chunk length. Address/length inputs must be integers within the 16-bit range.
+
+See [PROTOCOL_CAPTURE.md](PROTOCOL_CAPTURE.md) for capture schemas and compatibility checks.
 
 Many scalar settings are stored as two bytes:
 
@@ -140,8 +143,10 @@ The desktop language resources identify the related feature group as **DPI Dynam
 F1 AIR profiles add an eight-entry table at `0x1B00`. Each stage is six bytes:
 
 ```text
-X_DPI_LE16, Y_DPI_LE16, flag, checksum
+(X_DPI - 1)_LE16, (Y_DPI - 1)_LE16, flag, checksum
 ```
+
+Stored `0x04AF` means 1200 DPI, `0x095F` means 2400 and `0x0ED7` means 3800. The decoder adds one; the writer subtracts one.
 
 For the 60K profile the package uses flag `0x11`. This allows the advertised 1-DPI granularity up to 60,000 DPI.
 
@@ -153,7 +158,9 @@ Legacy four-byte records encode a 10-bit `(DPI / 50) - 1` value plus a checksum.
 
 ## Button actions
 
-Each of the six mappings is a four-byte checksummed record:
+Five physical mappings plus a sixth internal logical slot are stored as four-byte checksummed records. The default internal slot at `0x0074` is `02 01 00 52` (DPI cycle). F1 AIR side-button parameters are `0x0800` Forward and `0x1000` Backward.
+
+Record layout:
 
 ```text
 [action_type, parameter_high, parameter_low, checksum]

@@ -2,21 +2,21 @@ import {
   ADDRESS,
   APP_NAME,
   BUTTON_ACTIONS,
-  BUTTON_COUNT,
   CONSUMER_KEYS,
   DECORATIVE_LIGHT_MODES,
   DPI_LIGHT_MODES,
-  DPI_STAGE_COUNT,
-  F1_AIR_PROFILE,
   MACRO_MOUSE_EVENTS,
   POLLING_RATE_TO_RAW,
   RECEIVER_INDICATOR_MODES,
   SENSOR_MODES,
   SLEEP_CODES,
 } from './constants.js';
-import { hex, parseHex, u8 } from './codecs.js';
+import { hex, parseHex } from './codecs.js';
 import { CompXDevice } from './protocol.js';
 import { MouseModel } from './device-model.js';
+import { createCaptureLabState, renderCaptureLab, bindCaptureLab } from './ui/capture-lab.js';
+import { lodOptions as renderLodOptions, physicalButtons } from './ui/f1-controls.js';
+import { captureEndpoints } from './protocol/endpoints.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -33,6 +33,8 @@ const confirmCopy = $('#confirm-copy');
 
 const hid = new CompXDevice();
 const model = new MouseModel(hid);
+const captureLab = createCaptureLabState();
+const busyDisabled = new WeakMap();
 
 const app = {
   tab: 'overview',
@@ -46,6 +48,7 @@ const app = {
   selectedShortcutSlot: 0,
   shortcutDraft: [],
   firmwareInspection: null,
+  endpointCapture: null,
 };
 
 function esc(value) {
@@ -93,7 +96,15 @@ function setBusy(value) {
   app.busy = Boolean(value);
   connectBtn.disabled = app.busy;
   refreshBtn.disabled = app.busy || !hid.connected;
-  $$('button[data-write], input[data-write], select[data-write]').forEach((el) => { el.disabled = app.busy; });
+  $$('#content button, #content input, #content select, #content textarea, #nav button, #expert-writes').forEach((el) => {
+    if (app.busy) {
+      if (!busyDisabled.has(el)) busyDisabled.set(el, el.disabled);
+      el.disabled = true;
+    } else if (busyDisabled.has(el)) {
+      el.disabled = busyDisabled.get(el);
+      busyDisabled.delete(el);
+    }
+  });
 }
 
 function ensureWritable() {
@@ -101,10 +112,11 @@ function ensureWritable() {
   if (model.isVerifiedF1Air) return;
   if (expertWrites.checked) return;
   const id = model.identity;
-  throw new Error(`Writes are locked: connected CID/MID is ${id?.cid ?? '?'}/${id?.mid ?? '?'}, not the verified F1 AIR profile 124/(19–22). Enable Expert writes only if you know this is compatible.`);
+  throw new Error(`Writes are locked: connected CID/MID is ${id?.cid ?? '?'}/${id?.mid ?? '?'}, not the hardware-verified F1 AIR profile 124/20. Enable Expert writes only if you know this is compatible.`);
 }
 
 async function run(task, { write = false, success = null, rerender = true } = {}) {
+  if (app.busy) return null;
   try {
     if (write) ensureWritable();
     setBusy(true);
@@ -115,6 +127,7 @@ async function run(task, { write = false, success = null, rerender = true } = {}
   } catch (error) {
     console.error(error);
     toast(error?.message || String(error), 'error');
+    if (rerender) render();
     return null;
   } finally {
     setBusy(false);
@@ -162,8 +175,8 @@ function renderOverview() {
         <div class="card-head"><div><h3>Device identity</h3><p>Returned by the CompX handshake; used to gate writes.</p></div><span class="tag blue">VID 0x${Number(id.productId != null ? hid.device.vendorId : 0).toString(16).toUpperCase()}</span></div>
         <div class="setting-list">
           <div class="setting-row"><div class="setting-copy"><b>Product</b><small>${esc(id.productName)}</small></div><div class="mono">PID 0x${Number(id.productId).toString(16).padStart(4,'0').toUpperCase()}</div></div>
-          <div class="setting-row"><div class="setting-copy"><b>Protocol identity</b><small>Expected F1 AIR: CID 124, MID 19–22</small></div><div class="mono">CID ${id.cid} · MID ${id.mid}</div></div>
-          <div class="setting-row"><div class="setting-copy"><b>Firmware</b><small>Mouse / receiver</small></div><div>${fmtVersion(id.mouseVersion)} / ${fmtVersion(id.dongleVersion)}</div></div>
+          <div class="setting-row"><div class="setting-copy"><b>Protocol identity</b><small>Verified F1 AIR: CID 124 / MID 20; other package MIDs are candidates</small></div><div class="mono">CID ${id.cid} · MID ${id.mid}</div></div>
+          <div class="setting-row"><div class="setting-copy"><b>Version endpoints</b><small>Mouse endpoint / receiver. The wireless 0xB3 value may differ from Control HUB firmware.</small></div><div>${fmtVersion(id.mouseVersion)} / ${fmtVersion(id.dongleVersion)}</div></div>
         </div>
       </div>
       <div class="card">
@@ -177,12 +190,10 @@ function renderOverview() {
     </div>`;
 }
 
-const lodLegacyLabels = new Map([[3, '0.7 mm (legacy mapping)'], [1, '1.0 mm (legacy mapping)'], [2, '2.0 mm (legacy mapping)']]);
-
 function renderSensor() {
   const s = model.settings;
   const rateButtons = [...POLLING_RATE_TO_RAW.keys()].map((hz) => `<button class="button tiny ${s.reportRateHz === hz ? 'active' : ''}" data-rate="${hz}" data-write>${hz >= 1000 ? `${hz/1000}K` : hz} Hz</button>`).join('');
-  const stages = Array.from({ length: DPI_STAGE_COUNT }, (_, i) => {
+  const stages = Array.from({ length: s.stageCount }, (_, i) => {
     const value = s.dpi[i] ?? s.dpiLegacy[i] ?? 800;
     const color = s.dpiColors[i] || '#ffffff';
     return `<div class="dpi-stage ${i === s.currentStage ? 'current' : ''} ${i >= s.stageCount ? 'disabled-stage' : ''}">
@@ -192,11 +203,11 @@ function renderSensor() {
       <div class="button-row" style="margin-top:7px"><button class="button tiny" data-save-dpi="${i}" data-write>Save DPI</button><button class="button tiny ghost" data-save-color="${i}" data-write>Save color</button></div>
     </div>`;
   }).join('');
-  const lodOptions = Array.from({ length: 8 }, (_, raw) => `<option value="${raw}" ${selected(raw,s.lodRaw)}>Raw ${raw}${lodLegacyLabels.has(raw) ? ` · ${lodLegacyLabels.get(raw)}` : ''}</option>`).join('');
+  const lodOptions = renderLodOptions(s.lodRaw);
   const sensorModes = Object.entries(SENSOR_MODES).filter(([value]) => Number(value) < 256).map(([value,label]) => `<option value="${value}" ${selected(value,s.sensorMode)}>${esc(label)}</option>`).join('');
   const sleepOptions = SLEEP_CODES.map((x) => `<option value="${x.raw}" ${selected(x.raw,s.performanceTime)}>${x.label}</option>`).join('');
   const rotationRaw = s.sensorRotationRaw ?? (model.base?.[6] ?? 0);
-  const rotation = rotationRaw > 127 ? rotationRaw - 256 : rotationRaw;
+  const rotation = rotationRaw;
   return `${pageHead('Performance', 'Sensor', 'DPI, report rate and PAW3955 onboard sensor features. Exact DPI uses the F1 AIR high-resolution table recovered from the bundled driver.')}
     <div class="card">
       <div class="card-head"><div><h3>DPI stages</h3><p>F1 AIR profile: 1–60,000 DPI in 1-DPI increments. The exact high-resolution table and legacy table are updated together.</p></div><div class="control" style="min-width:130px"><label>Enabled stages</label><select id="stage-count" data-write>${Array.from({length:8},(_,i)=>`<option value="${i+1}" ${selected(i+1,s.stageCount)}>${i+1}</option>`).join('')}</select></div></div>
@@ -209,9 +220,9 @@ function renderSensor() {
           <div class="setting-row"><div class="setting-copy"><b>Polling rate</b><small>125–8000 Hz; high rates increase CPU and battery use.</small></div><div class="button-row">${rateButtons}</div></div>
           <div class="setting-row"><div class="setting-copy"><b>Debounce</b><small>Lower values reduce click delay but can expose switch chatter.</small></div><div class="inline" style="gap:8px"><input id="debounce" type="range" min="0" max="15" value="${s.debounce ?? 1}" data-write><span class="mono" id="debounce-label">${s.debounce ?? 1} ms</span></div></div>
           <div class="setting-row"><div class="setting-copy"><b>Sensor mode</b><small>“Corded / auto high-rate” is entered automatically by firmware and is not a byte-stored selectable value.</small></div><select id="sensor-mode" data-write>${sensorModes}</select></div>
-          <div class="setting-row"><div class="setting-copy"><b>LOD raw setting</b><small>The bundled desktop resources prove raw 3/1/2 for its legacy 0.7/1/2 mm set. F1 AIR advertises five finer PAW3955 LODs, but their new raw mapping is not yet independently verified; use raw values rather than guessed labels.</small></div><select id="lod-raw" data-write>${lodOptions}</select></div>
-          <div class="setting-row"><div class="setting-copy"><b>Sensor rotation</b><small>Likely signed rotation byte at flash 0x0006; exposed as experimental until confirmed on-device.</small></div><div class="inline" style="gap:8px"><input id="sensor-rotation" type="number" min="-45" max="45" value="${rotation}"><button class="button tiny" id="save-rotation" data-write>Save</button></div></div>
-          <div class="setting-row"><div class="setting-copy"><b>20K FPS scanning</b><small>Flash 0x0008 from the extended F1 software family; experimental write.</small></div><label class="switch"><input id="scan-20k" type="checkbox" ${checked(Boolean(s.sensorStaticScan))} data-write><span class="switch-track"></span><span class="switch-text">${s.sensorStaticScan ? 'On' : 'Off'}</span></label></div>
+          <div class="setting-row"><div class="setting-copy"><b>Lift-off distance (LOD)</b><small>Verified F1 AIR levels: 0.7, 0.9, 1.2, 1.4 and 1.6 mm.</small></div><select id="lod-raw" data-write>${lodOptions}</select></div>
+          <div class="setting-row"><div class="setting-copy"><b>Sensor rotation</b><small>Candidate raw byte at 0x0006. Angle units and signed encoding are unproven; Expert writes required.</small></div><div class="inline" style="gap:8px"><input id="sensor-rotation" type="number" min="0" max="255" value="${rotation}"><button class="button tiny" id="save-rotation" data-write>Save</button></div></div>
+          <div class="setting-row"><div class="setting-copy"><b>20K FPS scanning</b><small>Candidate at 0x0008; On/Off semantics need capture verification. Expert writes required.</small></div><label class="switch"><input id="scan-20k" type="checkbox" ${checked(Boolean(s.sensorStaticScan))} data-write><span class="switch-track"></span><span class="switch-text">${s.sensorStaticScan ? 'On' : 'Off'}</span></label></div>
         </div>
       </div>
       <div class="card">
@@ -232,23 +243,23 @@ function toggleRow(id, title, copy, value) {
 }
 
 function buttonSelection(button) {
-  if (!button) return '';
-  if (button.type === 5) return `shortcut:${button.param}`;
-  if (button.type === 6) return `macro:${button.param}`;
-  if (button.type === 4) return 'fire';
+  if (!button) return 'preserve';
+  if (button.type === 5) return button.param < 16 ? `shortcut:${button.param}` : 'preserve';
+  if (button.type === 6) return button.param < 16 ? `macro:${button.param}` : 'preserve';
+  if (button.type === 4) return 'preserve';
   const exact = BUTTON_ACTIONS.find((a) => a.type === button.type && a.param === button.param);
-  return exact?.key ?? 'custom';
+  return exact?.key ?? 'preserve';
 }
 
 function buttonOptions(current) {
   const base = BUTTON_ACTIONS.map((x) => `<option value="${x.key}" ${selected(x.key,current)}>${esc(x.label)}</option>`).join('');
   const shortcuts = Array.from({length:16},(_,i)=>`<option value="shortcut:${i}" ${selected(`shortcut:${i}`,current)}>Shortcut / combo slot ${i+1}</option>`).join('');
   const macros = Array.from({length:16},(_,i)=>`<option value="macro:${i}" ${selected(`macro:${i}`,current)}>Macro slot ${i+1}</option>`).join('');
-  return `${base}<option value="fire" ${selected('fire',current)}>Firepower / rapid left click…</option>${shortcuts}${macros}<option value="custom" ${selected('custom',current)}>Custom raw type / parameter</option>`;
+  return `<option value="preserve" ${selected('preserve',current)}>Keep current raw mapping</option>${base}<option value="fire" ${selected('fire',current)}>Firepower / rapid left click (Expert)…</option>${shortcuts}${macros}<option value="custom" ${selected('custom',current)}>Custom raw type / parameter</option>`;
 }
 
 function renderButtons() {
-  const rows = model.settings.buttons.map((button, i) => {
+  const rows = physicalButtons(model.settings).map((button, i) => {
     const current = buttonSelection(button);
     return `<div class="button-map-row" data-button-row="${i}">
       <div><div class="button-name">${esc(button.name)}</div><div class="raw">#${i+1} · ${button.type != null ? `type 0x${button.type.toString(16).toUpperCase()} · param 0x${button.param.toString(16).padStart(4,'0').toUpperCase()}` : 'invalid checksum'}</div></div>
@@ -256,10 +267,10 @@ function renderButtons() {
       <button class="button" data-save-button="${i}" data-write>Apply</button>
     </div>`;
   }).join('');
-  return `${pageHead('Input', 'Button mapping', 'All six F1 AIR controls, including mouse buttons, DPI/report/profile functions, combos, macros, media helpers and Attack Shark light toggles.')}
+  return `${pageHead('Input', 'Button mapping', 'Map the five physical F1 AIR controls: left, right, wheel click, forward and backward.')}
     <div class="grid two">
       <div class="card">
-        <div class="card-head"><div><h3>Onboard buttons</h3><p>Mappings are stored as 4-byte checksummed records at flash 0x0060.</p></div></div>
+        <div class="card-head"><div><h3>Onboard buttons</h3><p>Five physical controls. The sixth internal logical record is preserved in backups and Diagnostics.</p></div></div>
         <div class="button-map">${rows}</div>
       </div>
       <div class="card">
@@ -366,8 +377,8 @@ function renderLighting() {
       </div>
     </div>
     <div class="card" style="margin-top:14px">
-      <div class="card-head"><div><h3>8K receiver indicator</h3><p>Dedicated receiver commands recovered from HIDUsb.dll. Read current receiver state first.</p></div><button class="button" id="read-receiver-led">Read receiver</button></div>
-      <div class="inline" style="gap:8px;max-width:720px"><select id="receiver-mode">${RECEIVER_INDICATOR_MODES.map(x=>`<option value="${x.raw}">${x.label}</option>`).join('')}</select><input id="receiver-arg1" type="number" min="0" max="255" value="0" title="raw arg1"><input id="receiver-arg2" type="number" min="0" max="255" value="0" title="raw arg2"><button class="button primary" id="save-receiver-led" data-write>Apply</button></div>
+      <div class="card-head"><div><h3>8K receiver indicator</h3><p>Read current state first. Assignment labels are candidates; writing raw receiver fields requires Expert writes.</p></div><button class="button" id="read-receiver-led">Read receiver</button></div>
+      <div class="inline" style="gap:8px;max-width:720px"><select id="receiver-mode">${RECEIVER_INDICATOR_MODES.map(x=>`<option value="${x.raw}">Candidate: ${x.label}</option>`).join('')}</select><input id="receiver-arg1" type="number" min="0" max="255" value="0" title="raw arg1"><input id="receiver-arg2" type="number" min="0" max="255" value="0" title="raw arg2"><button class="button primary" id="save-receiver-led" data-write>Apply</button></div>
       <div id="receiver-readout" class="raw" style="margin-top:10px">Not read yet.</div>
     </div>`;
 }
@@ -389,7 +400,7 @@ function renderProfiles() {
       <div class="card">
         <div class="card-head"><div><h3>Backup / restore</h3><p>Backups contain the 232-byte base settings, 60K-DPI extension and optionally all shortcut/macro slots.</p></div></div>
         <div class="button-row"><button class="button primary" id="export-backup">Export full backup</button><button class="button" id="import-backup" data-write>Import backup…</button><button class="button danger" id="factory-reset" data-write>Factory reset</button></div>
-        <div class="notice info" style="margin-top:14px">Import checks the backup schema and CID before writing. Every region is read back and verified by the transport layer.</div>
+        <div class="notice info" style="margin-top:14px">Import validates all region addresses, lengths, identity and active profile before writing. Normal restore preserves current candidate/unmapped bytes; Expert writes also restores those bytes from the backup. Hidden firmware records are retained.</div>
       </div>
     </div>
     <div class="grid two" style="margin-top:14px">
@@ -400,11 +411,13 @@ function renderProfiles() {
 
 function renderDiagnostics() {
   const diag = model.diagnostics();
-  const advanced = model.settings.advanced;
+  const advanced = model.settings?.advanced ?? { pairs: {}, blocks: {} };
   const rows = Object.entries(advanced.pairs).map(([addr,value])=>`<tr><td>${addr}</td><td>pair</td><td>${value ?? 'invalid'}</td></tr>`).join('') + Object.entries(advanced.blocks).map(([addr,value])=>`<tr><td>${addr}</td><td>4 B + checksum</td><td>${value.valid ? `0x${(value.valueLE>>>0).toString(16).padStart(8,'0')}` : 'invalid'} · ${hex(value.bytes)}</td></tr>`).join('');
   const high = model.highResDpi.map((x,i)=>`<tr><td>${i+1}</td><td>0x${(ADDRESS.HIGH_RES_DPI+i*6).toString(16).toUpperCase()}</td><td>${x.parsed?.dpi ?? '—'}</td><td>${x.parsed?.flag != null ? `0x${x.parsed.flag.toString(16).toUpperCase()}` : '—'}</td><td class="mono">${hex(x.raw)}</td></tr>`).join('');
   const logs = hid.log.slice(-120).reverse().map(x=>`<div class="packet-line"><span>${x.time.toLocaleTimeString()}</span><b class="${x.direction}">${x.direction.toUpperCase()}</b><span>${x.body ? hex(x.body) : esc(x.note)} ${esc(x.note)}</span></div>`).join('');
   return `${pageHead('Reverse engineering', 'Diagnostics', 'Raw settings, high-resolution DPI records, currently-unidentified extended fields and live HID traffic.')}
+    ${renderCaptureLab(captureLab, hid.connected && Boolean(model.identity && model.settings))}
+    <div class="card" style="margin-bottom:14px"><div class="card-head"><div><h3>Read-only endpoint probes</h3><p>Version 0xB3 may differ from the official firmware display. Receiver lighting semantics remain unverified. Raw replies and endpoint errors are exported unchanged.</p></div></div><div class="button-row"><button class="button" id="probe-versions" ${disabled(!hid.connected)}>Read version endpoints</button><button class="button" id="probe-receiver" ${disabled(!hid.connected)}>Read receiver lighting</button><button class="button ghost" id="export-endpoints" ${disabled(!app.endpointCapture)}>Export endpoint JSON</button></div><pre class="hex-box">${app.endpointCapture ? esc(JSON.stringify(app.endpointCapture,null,2)) : 'No endpoints captured yet.'}</pre></div>
     <div class="grid two">
       <div class="card"><div class="card-head"><div><h3>F1 identity gate</h3><p>Writes are allowed automatically only for the profile evidenced by the bundled package.</p></div><span class="tag ${model.isVerifiedF1Air?'accent':'warning'}">${model.isVerifiedF1Air?'MATCH':'NO MATCH'}</span></div><div class="hex-box">${esc(JSON.stringify(diag.identity,null,2))}</div></div>
       <div class="card"><div class="card-head"><div><h3>High-resolution DPI table</h3><p>Eight six-byte PAW3955 records at 0x1B00.</p></div></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Address</th><th>DPI</th><th>Flag</th><th>Raw</th></tr></thead><tbody>${high}</tbody></table></div></div>
@@ -413,14 +426,14 @@ function renderDiagnostics() {
       <div class="card"><div class="card-head"><div><h3>Base settings dump</h3><p>232 bytes read from flash 0x0000–0x00E7.</p></div><button class="button tiny" id="copy-base">Copy</button></div><div class="hex-box">${diag.baseHex ? diag.baseHex.match(/.{1,48}/g).join('\n') : '—'}</div></div>
       <div class="card"><div class="card-head"><div><h3>Extended fields</h3><p>The DLL validates additional settings after SensorMode. Their integrity/layout is known; user-facing semantics still need captures.</p></div></div><div class="table-wrap"><table><thead><tr><th>Address</th><th>Layout</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table></div></div>
     </div>
-    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>HID packet log</h3><p>Report ID 8 is omitted; each line shows the 16-byte body.</p></div><div class="button-row"><button class="button tiny" id="download-log">Download log</button><button class="button tiny" id="clear-log">Clear</button></div></div><div class="packet-log">${logs || 'No packets yet.'}</div></div>
+    <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Live HID log</h3><p>Report ID 8 is omitted; each line shows the 16-byte body. Invalid packets stay in the log but cannot complete requests.</p></div><div class="button-row"><button class="button tiny" id="download-log">Download log</button><button class="button tiny" id="clear-log">Clear</button></div></div><div class="packet-log" id="live-hid-log">${logs || 'No packets yet.'}</div></div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div><h3>Expert flash read</h3><p>Read any address without writing it.</p></div></div><div class="inline" style="gap:7px;max-width:650px"><input id="raw-address" type="text" value="0x0000"><input id="raw-length" type="number" min="1" max="4096" value="16"><button class="button" id="raw-read">Read</button></div><div id="raw-result" class="hex-box" style="margin-top:10px">—</div></div>`;
 }
 
 function render() {
   setConnectionUi();
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.tab === app.tab));
-  if (!hid.connected || !model.identity || !model.settings) {
+  if (app.tab !== 'diagnostics' && (!hid.connected || !model.identity || !model.settings)) {
     content.innerHTML = emptyState();
     $('#empty-connect')?.addEventListener('click', connectDevice);
     return;
@@ -428,6 +441,7 @@ function render() {
   const renderers = { overview:renderOverview, sensor:renderSensor, buttons:renderButtons, macros:renderMacros, lighting:renderLighting, profiles:renderProfiles, diagnostics:renderDiagnostics };
   content.innerHTML = (renderers[app.tab] ?? renderOverview)();
   bindCurrentTab();
+  if (app.busy) setBusy(true);
 }
 
 async function connectDevice() {
@@ -468,13 +482,14 @@ function bindSensor() {
   writePairControl('#highest-performance',ADDRESS.PERFORMANCE_STATE,(v)=>v?1:0);
   writePairControl('#performance-time',ADDRESS.PERFORMANCE_TIME,(v)=>Number(v));
   writePairControl('#scan-20k',ADDRESS.SENSOR_STATIC_SCAN,(v)=>v?1:0);
-  $('#save-rotation')?.addEventListener('click',()=>run(()=>model.writePair(0x0006,u8(Number($('#sensor-rotation').value))),{write:true,success:'Experimental sensor rotation byte saved'}));
+  $('#save-rotation')?.addEventListener('click',()=>run(()=>model.writePair(0x0006,Number($('#sensor-rotation').value)),{write:true,success:'Experimental sensor rotation byte saved'}));
 }
 
 function bindButtons() {
   $$('[data-save-button]').forEach((el)=>el.addEventListener('click', async()=>{
     const i=Number(el.dataset.saveButton); const value=$(`[data-button-action="${i}"]`).value;
     await run(async()=>{
+      if (value === 'preserve') return;
       if (value.startsWith('macro:')) return model.setButton(i,6,Number(value.split(':')[1]));
       if (value.startsWith('shortcut:')) return model.setButton(i,5,Number(value.split(':')[1]));
       if (value==='fire') {
@@ -517,7 +532,7 @@ function syncMacroDraftFromDom() {
 function bindMacros() {
   $$('[data-macro-slot]').forEach((el)=>el.addEventListener('click',()=>{ if(app.macroRecording)return; app.selectedMacroSlot=Number(el.dataset.macroSlot); app.macroLoaded=false; app.macroDraft={name:`Macro ${String(app.selectedMacroSlot+1).padStart(2,'0')}`,events:[]}; render(); }));
   $('#load-macro')?.addEventListener('click',()=>run(async()=>{ const result=await model.getMacroSlot(app.selectedMacroSlot,true); app.macroDraft={name:result.parsed.name||`Macro ${app.selectedMacroSlot+1}`,events:result.parsed.events}; app.macroLoaded=true; },{success:'Macro slot loaded'}));
-  $('#save-macro')?.addEventListener('click',()=>run(async()=>{ syncMacroDraftFromDom(); await model.setMacroSlot(app.selectedMacroSlot,app.macroDraft); },{write:true,success:'Macro saved'}));
+  $('#save-macro')?.addEventListener('click',()=>run(async()=>{ if (!app.macroLoaded) throw new Error('Load the macro slot before saving.'); syncMacroDraftFromDom(); await model.setMacroSlot(app.selectedMacroSlot,app.macroDraft); },{write:true,success:'Macro saved'}));
   $('#add-mouse-event')?.addEventListener('click',()=>{ syncMacroDraftFromDom(); const source=MACRO_MOUSE_EVENTS[Number($('#mouse-event').value)]; app.macroDraft.events.push({kind:'mouse',code:source.code,data1:source.data1,data2:source.data2,delayMs:10}); render(); });
   $('#add-key-event')?.addEventListener('click',()=>{ syncMacroDraftFromDom(); app.macroDraft.events.push({kind:'key-down',code:1,data1:4,data2:0,delayMs:10}); render(); });
   $$('[data-remove-event]').forEach((el)=>el.addEventListener('click',()=>{ syncMacroDraftFromDom(); app.macroDraft.events.splice(Number(el.dataset.removeEvent),1); render(); }));
@@ -555,11 +570,30 @@ function bindProfiles() {
 }
 
 function bindDiagnostics() {
+  bindCaptureLab(content, captureLab, { hid, run, render, download });
+  for (const group of ['versions', 'receiver']) $(`#probe-${group}`)?.addEventListener('click', () => run(async () => { app.endpointCapture = await captureEndpoints(hid, group, captureLab.notes); }));
+  $('#export-endpoints')?.addEventListener('click', () => download(`f1-air-${app.endpointCapture.group}-endpoints.json`, JSON.stringify(app.endpointCapture,null,2), 'application/json'));
   $('#copy-base')?.addEventListener('click',async()=>{ await navigator.clipboard.writeText(model.diagnostics().baseHex || ''); toast('Base dump copied','success'); });
   $('#download-log')?.addEventListener('click',()=>download('f1-air-hid-log.txt',hid.exportLog(),'text/plain'));
   $('#clear-log')?.addEventListener('click',()=>{hid.log.length=0;render();});
-  $('#raw-read')?.addEventListener('click',()=>run(async()=>{ const address=Number.parseInt($('#raw-address').value,0); const length=Number($('#raw-length').value); if(!Number.isFinite(address)||!Number.isFinite(length))throw new Error('Invalid address or length.'); const bytes=await hid.readFlash(address,length); $('#raw-result').textContent=hex(bytes); },{rerender:false}));
+  $('#raw-read')?.addEventListener('click',()=>run(async()=>{ const address=Number($('#raw-address').value); const length=Number($('#raw-length').value); if(!Number.isInteger(length)||length<1||length>4096)throw new Error('Read length must be 1–4096 bytes.'); const bytes=await hid.readFlash(address,length); $('#raw-result').textContent=hex(bytes); },{rerender:false}));
 }
+
+let logFrame = null;
+model.addEventListener('profilechange', () => {
+  app.macroLoaded = false;
+  app.macroRecording = false;
+  app.macroDraft = { name: 'Macro 01', events: [] };
+  app.shortcutDraft = [];
+});
+hid.addEventListener('log', () => {
+  if (app.tab !== 'diagnostics' || logFrame !== null) return;
+  logFrame = requestAnimationFrame(() => {
+    logFrame = null;
+    const log = $('#live-hid-log');
+    if (log) log.textContent = hid.exportLog().split('\n').slice(-120).reverse().join('\n');
+  });
+});
 
 function bindCurrentTab() {
   const binders={overview:bindOverview,sensor:bindSensor,buttons:bindButtons,macros:bindMacros,lighting:bindLighting,profiles:bindProfiles,diagnostics:bindDiagnostics};
@@ -587,7 +621,7 @@ refreshBtn.addEventListener('click',()=>run(async()=>{await model.refreshIdentit
 
 backupFile.addEventListener('change',async()=>{
   const file=backupFile.files?.[0]; backupFile.value=''; if(!file)return;
-  try { const backup=JSON.parse(await file.text()); if(!await confirmAction('Import onboard backup?','This overwrites the backed-up flash regions after validating the schema and F1 CID.'))return; await run(()=>model.restoreBackup(backup),{write:true,success:'Backup restored'}); } catch(error){toast(error.message,'error');}
+  try { const backup=JSON.parse(await file.text()); if(!await confirmAction('Import onboard backup?','This restores validated regions to the same device identity and active profile. Candidate/unmapped bytes remain unchanged unless Expert writes is enabled. Keep Control HUB closed during restore.'))return; await run(()=>model.restoreBackup(backup),{write:true,success:'Backup restored'}); } catch(error){toast(error.message,'error');}
 });
 
 firmwareFile.addEventListener('change',async()=>{
@@ -598,9 +632,9 @@ firmwareFile.addEventListener('change',async()=>{
   toast('Firmware image inspected only; nothing was written to the device.','success');
 });
 
-expertWrites.addEventListener('change',()=>{if(expertWrites.checked)toast('Expert writes enabled. CID/MID safety gate is bypassed for this session.');});
+expertWrites.addEventListener('change',()=>{model.expertWrites=expertWrites.checked; if(expertWrites.checked)toast('Expert writes enabled for unverified devices and candidate fields.');});
 
-hid.addEventListener('disconnected',()=>{model.identity=null;model.base=null;model.settings=null;render();});
+hid.addEventListener('disconnected',()=>{model.identity=null;model.base=null;model.settings=null;model.highResDpi=[];model.macros.clear();model.shortcuts.clear();model.expertWrites=false;expertWrites.checked=false;app.macroLoaded=false;render();});
 navigator.hid?.addEventListener?.('disconnect',(event)=>{if(hid.device===event.device){hid.close().catch(()=>{});}});
 
 if (!('hid' in navigator)) $('#unsupported-browser').classList.remove('hidden');

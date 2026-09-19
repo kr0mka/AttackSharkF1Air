@@ -104,6 +104,19 @@ test('shortcut compact events round-trip', () => {
   assert.deepEqual(decoded.events, events);
 });
 
+test('macro and shortcut editing preserve opaque padding and bytes beyond the new checksum', () => {
+  const original = new Uint8Array(384).fill(0xa5);
+  const encoded = encodeMacro({ name: 'X', events: [] }, { original });
+  assert.deepEqual(encoded.slice(2, 31), original.slice(2, 31));
+  assert.deepEqual(encoded.slice(33), original.slice(33));
+  assert.equal(decodeMacro(encoded).valid, true);
+  assert.equal(decodeMacro(encoded).name, 'X');
+  const shortcutOriginal = new Uint8Array(32).fill(0x5a);
+  const shortcut = encodeShortcut([], { original: shortcutOriginal });
+  assert.deepEqual(shortcut.slice(2), shortcutOriginal.slice(2));
+  assert.equal(decodeShortcut(shortcut).valid, true);
+});
+
 test('receiver-marker command keeps 0x0A marker instead of payload length', () => {
   const body = rawCommandBody(OPCODE.SET_RECEIVER_INDICATOR, [2, 3, 4], { marker: 0x0a });
   assert.equal(body[4], 0x0a);
@@ -121,7 +134,7 @@ test('request/response exchanges are serialized for the receiver', async () => {
   const sent = [];
   const resolvers = [];
   device.waitFor = () => new Promise((resolve) => resolvers.push(resolve));
-  device.send = async (_body, note) => { sent.push(note); };
+  device._sendNow = async (_body, note) => { sent.push(note); };
 
   const first = device.exchange(new Uint8Array(16), () => true, 900, 'first');
   const second = device.exchange(new Uint8Array(16), () => true, 900, 'second');

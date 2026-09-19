@@ -1,63 +1,54 @@
-# F1 AIR protocol capture workflow
+# Protocol capture formats and validation
 
-The open panel should not guess when a vendor setting can be captured.
+See [CAPTURE_WORKFLOW.md](CAPTURE_WORKFLOW.md) for the Diagnostics procedure and presets.
 
-## Capture process
+## Snapshot: `attackshark-f1-air-capture/v2`
 
-1. Export a backup from the panel.
-2. Capture a baseline region.
-3. Change exactly one setting in the official Control HUB.
-4. Capture the same region again.
-5. Diff the two captures.
-6. Promote only stable changes into the protocol registry.
+- `createdAt`, `completedAt`: ISO timestamps bounding the read.
+- `label`, `notes`, `preset`: experiment context.
+- `identity`: VID, PID, product name, CID, MID and device type, freshly read for the capture.
+- `activeProfile`: zero-based onboard profile, read before/after the operation.
+- `regions`: objects keyed by region name; each holds `label`, integer `address`, exact `length`, and an ordinary array of integer `bytes` (0–255).
 
-## Confidence levels
+Byte arrays are raw, including unknown/hidden data and record checksums. Regions must fit the 16-bit flash range without overlap. A short read is not padded into a valid snapshot.
 
-- verified: directly observed on F1 AIR hardware with before/after captures.
-- likely: supported by vendor DLL behavior and stable layout.
-- candidate: address known but semantic meaning not proven.
+## Comparison: `attackshark-f1-air-comparison/v1`
 
-## Recommended first captures
+Includes `createdAt`, experiment `notes`, the complete `before` and `after` v2 snapshots, and `diff` sorted by absolute address. Each change contains:
 
-### Sensor
+```json
+{
+  "region": "sensor",
+  "offset": 10,
+  "address": 10,
+  "before": 1,
+  "after": 2,
+  "field": "Lift-off distance",
+  "confidence": "verified"
+}
+```
 
-Capture base settings before/after:
+The example illustrates representation only. Checksum-byte changes are separate rows. Equal bytes are omitted. Empty `diff` means the selected region did not change. Missing regions, unequal lengths, changed identities or different profiles are rejected rather than treated as byte changes. Imported diffs/labels are recomputed from raw snapshots using the current protocol registry.
 
-- LP/HP sensor mode
-- motion sync
-- ripple
-- angle snapping
-- highest performance
-- 20K FPS scan
-- dynamic sensitivity presets
+The foundation's v1 byte-only helpers remain available for historical tooling, but v1 captures cannot be imported as comparable v2 evidence without the missing metadata. JSON imports are limited to 2 MB. The UI accepts the seven supported preset ranges; the pure comparison API also supports multiple explicitly addressed, nonoverlapping regions.
 
-### Lighting
+## Endpoint capture: `attackshark-f1-air-endpoints/v1`
 
-Capture:
+Includes timestamps, identity, active profile, notes, group, `reportId: 8`, and `responses`. Each response records the opcode, endpoint label, status and exact 16-byte body, or `body: null` plus an error. Errors are not represented as zero-filled successful responses. Endpoint exports are distinct from flash comparison files; use their raw responses for wired/wireless and receiver-light investigations.
 
-- DPI indicator modes
-- light bar effects
-- receiver LED assignments
-- RGB colors
+Version group: `0x12`, `0x1D`, `0xB3`. Receiver group: `0x2D`, `0x19`. These fixed allowlists cannot accept bootloader/set/write commands. The wireless slave-version response is not automatically the firmware number shown by Control HUB.
 
-### Macros
+## Confidence and writes
 
-Create one macro for each repeat mode:
+- **verified**: observed on F1 AIR hardware.
+- **likely**: supported structurally by the installed package/parser; semantics still deserve controlled verification.
+- **candidate**: proposed field association; exact meaning unproven.
+- **unknown**: unmapped bytes.
 
-- once
-- repeat until release
-- repeat until any key
-- toggle repeat
-- fixed count
+`src/protocol-map.js` is the address registry. New discoveries require a factual evidence note and regression test before promotion. Capture comparisons never alter confidence automatically.
 
-Compare both macro bytes and the button assignment record.
+Candidate/unmapped scalar fields and unverified button/receiver parameters require Expert writes. Normal backup restore writes only verified/likely spans, keeping current unknown/candidate bytes untouched. Expert restore copies every byte of the validated backup regions. Both paths preserve the sixth stored logical button record and all eight DPI records; neither follows arbitrary file-supplied addresses.
 
-## Firmware endpoints
+## Validation
 
-Always record raw responses from:
-
-- `0x12`
-- `0x1D`
-- `0xB3`
-
-because wireless F1 AIR firmware reporting has multiple endpoint paths.
+`npm test` covers absolute diffs, boundaries, metadata mismatches, malformed imports, snapshot freshness, timeout/disconnect behavior, serialization, hidden records, restoration and byte preservation. `npm run check` recursively syntax-checks source, tests and tools. Optional `node tools/browser-smoke.mjs [base-url]` exercises the real UI with a simulated WebHID device, including the deployed Pages URL. It never opens hardware.

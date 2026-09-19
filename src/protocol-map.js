@@ -34,7 +34,9 @@ export const FLASH_FIELDS = Object.freeze([
 ]);
 
 export function fieldForAddress(address) {
+  if (typeof address !== 'number' && (typeof address !== 'string' || !/^(?:0x[0-9a-f]+|\d+)$/i.test(address))) return null;
   const value = Number(address);
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) return null;
   return FLASH_FIELDS.find((field) => value >= field.start && value <= field.end) ?? null;
 }
 
@@ -46,8 +48,8 @@ export function describeAddress(address) {
 export const CAPTURE_PRESETS = Object.freeze({
   base: { label: 'Base settings', address: 0x0000, length: 0x00e8 },
   sensor: { label: 'Sensor + performance', address: 0x0000, length: 0x00e8 },
-  buttons: { label: 'Buttons', address: 0x0060, length: 0x0028 },
-  lighting: { label: 'DPI + mouse lighting', address: 0x004c, length: 0x005d },
+  buttons: { label: 'Buttons (including internal slot)', address: 0x0060, length: 0x0018 },
+  lighting: { label: 'Lighting (colors, effects, light bar)', address: 0x002c, length: 0x0089 },
   highDpi: { label: 'PAW3955 high-resolution DPI', address: 0x1b00, length: 0x0030 },
   shortcuts: { label: 'Shortcut / combo slots', address: 0x0100, length: 0x0200 },
   macros: { label: 'All macro slots', address: 0x0300, length: 0x1800 },
