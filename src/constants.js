@@ -122,6 +122,7 @@ export const F1_AIR_PROFILE = Object.freeze({
   vendorId: VENDOR_ID,
   cid: 124,
   supportedMids: [19, 20, 21, 22],
+  verifiedMids: [20],
   sensor: 'PAW3955',
   dpi: { min: 1, max: 60000, step: 1, highResFlag: 0x11 },
   lodMm: [0.7, 0.9, 1.2, 1.4, 1.6],

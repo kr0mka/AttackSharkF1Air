@@ -8,6 +8,7 @@ import {
 } from './constants.js';
 import { calibratedBatteryPercent } from './battery.js';
 import { checksumFor, hex, u8 } from './codecs.js';
+import { validateBytes, validateFlashRange } from './protocol/validation.js';
 
 export function packetBody(opcode, { address = 0, length = 0, payload = [], feature = false } = {}) {
   const body = new Uint8Array(BODY_SIZE);
@@ -32,16 +33,8 @@ export function rawCommandBody(opcode, payload = [], { marker = null, feature = 
 }
 
 export function packetChecksumValid(body) {
-  if (!body || body.length < BODY_SIZE) return false;
+  if (!body || body.length !== BODY_SIZE) return false;
   return ([...body.slice(0, BODY_SIZE)].reduce((a, b) => (a + b) & 0xff, 0) & 0xff) === BODY_CHECKSUM_TARGET;
-}
-
-function withTimeout(promise, timeoutMs, message = 'HID request timed out') {
-  let timer;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
-  ]);
 }
 
 export class CompXDevice extends EventTarget {
@@ -54,6 +47,7 @@ export class CompXDevice extends EventTarget {
     // The F1 AIR 8K receiver only reliably services one request/response
     // transaction at a time. The vendor DLL serializes these exchanges too.
     this._exchangeTail = Promise.resolve();
+    this._connectionGeneration = 0;
     this._inputHandler = this._onInputReport.bind(this);
   }
 
@@ -82,6 +76,7 @@ export class CompXDevice extends EventTarget {
 
   async open(device) {
     if (this.device?.opened) await this.close();
+    this._connectionGeneration += 1;
     this.device = device;
     if (!device.opened) await device.open();
     device.addEventListener('inputreport', this._inputHandler);
@@ -91,6 +86,8 @@ export class CompXDevice extends EventTarget {
 
   async close() {
     if (!this.device) return;
+    this._connectionGeneration += 1;
+    for (const waiter of [...this.waiters]) waiter.reject(new Error('HID device disconnected.'));
     this.device.removeEventListener('inputreport', this._inputHandler);
     if (this.device.opened) await this.device.close();
     this._log('system', null, 'Closed HID device');
@@ -107,10 +104,10 @@ export class CompXDevice extends EventTarget {
 
   _onInputReport(event) {
     if (event.reportId !== REPORT_ID) return;
-    const body = new Uint8Array(event.data.buffer, event.data.byteOffset, Math.min(BODY_SIZE, event.data.byteLength));
+    const body = new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength);
     const copy = Uint8Array.from(body);
     this._log('in', copy, packetChecksumValid(copy) ? '' : 'checksum?');
-    const pending = [...this.waiters];
+    const pending = packetChecksumValid(copy) ? [...this.waiters] : [];
     for (const waiter of pending) {
       let matched = false;
       try { matched = waiter.predicate(copy); } catch { matched = false; }
@@ -123,6 +120,14 @@ export class CompXDevice extends EventTarget {
   }
 
   async send(body, note = '') {
+    const generation = this._connectionGeneration;
+    return this._serializeExchange(() => {
+      if (generation !== this._connectionGeneration) throw new Error('HID connection changed before send.');
+      return this._sendNow(body, note);
+    });
+  }
+
+  async _sendNow(body, note = '') {
     if (!this.connected) throw new Error('No mouse connected.');
     const packet = Uint8Array.from(body);
     if (packet.length !== BODY_SIZE) throw new Error(`Expected ${BODY_SIZE}-byte HID body.`);
@@ -132,13 +137,18 @@ export class CompXDevice extends EventTarget {
 
   waitFor(predicate, timeoutMs = 900) {
     let waiter;
+    let timer;
     const promise = new Promise((resolve, reject) => {
       waiter = { predicate, resolve, reject };
       this.waiters.push(waiter);
+      timer = setTimeout(() => reject(new Error('HID request timed out')), timeoutMs);
     });
-    return withTimeout(promise, timeoutMs).finally(() => {
+    const result = promise.finally(() => {
+      clearTimeout(timer);
       this.waiters = this.waiters.filter((w) => w !== waiter);
     });
+    result.cancel = (error) => waiter.reject(error);
+    return result;
   }
 
   _serializeExchange(task) {
@@ -149,11 +159,19 @@ export class CompXDevice extends EventTarget {
   }
 
   async exchange(body, predicate, timeoutMs = 900, note = '') {
+    const generation = this._connectionGeneration;
     return this._serializeExchange(async () => {
+      if (generation !== this._connectionGeneration) throw new Error('HID connection changed before exchange.');
       // Start the timeout only when this transaction reaches the head of the
       // queue; otherwise queued commands could expire before they are sent.
       const response = this.waitFor(predicate, timeoutMs);
-      await this.send(body, note);
+      // Attach rejection handling before sendReport: it can outlive the timeout.
+      response.catch(() => {});
+      try { await this._sendNow(body, note); }
+      catch (error) {
+        response.cancel?.(error);
+        throw error;
+      }
       return response;
     });
   }
@@ -203,7 +221,7 @@ export class CompXDevice extends EventTarget {
 
   async getVersion(opcode = OPCODE.READ_VERSION) {
     const response = await this.command(opcode);
-    return { major: response[5], minor: response[6], raw: response };
+    return { opcode, major: response[5], minor: response[6], raw: response };
   }
 
   async getCurrentProfile() {
@@ -241,29 +259,37 @@ export class CompXDevice extends EventTarget {
     await this.send(body, 'factory reset');
   }
 
-  async readFlash(address, length) {
+  async readFlash(address, length, { onProgress = () => {} } = {}) {
+    validateFlashRange(address, length);
+    const generation = this._connectionGeneration;
     const result = new Uint8Array(length);
     let offset = 0;
     while (offset < length) {
+      if (generation !== this._connectionGeneration) throw new Error('HID connection changed during flash read.');
       const chunkLength = Math.min(10, length - offset);
       const addr = address + offset;
       const request = packetBody(OPCODE.READ_FLASH, { address: addr, length: chunkLength });
       const response = await this.exchange(
         request,
-        (r) => r[0] === OPCODE.READ_FLASH && ((r[2] << 8) | r[3]) === addr,
+        (r) => r[0] === OPCODE.READ_FLASH && ((r[2] << 8) | r[3]) === addr && (r[4] & 0x7f) === chunkLength,
         1200,
         `read 0x${addr.toString(16)} +${chunkLength}`,
       );
       result.set(response.slice(5, 5 + chunkLength), offset);
       offset += chunkLength;
+      onProgress(offset, length);
     }
+    if (generation !== this._connectionGeneration) throw new Error('HID connection changed during flash read.');
     return result;
   }
 
   async writeFlash(address, data, { verify = true, pacingMs = 8 } = {}) {
-    const bytes = Uint8Array.from(data);
+    const bytes = validateBytes(data);
+    validateFlashRange(address, bytes.length);
+    const generation = this._connectionGeneration;
     let offset = 0;
     while (offset < bytes.length) {
+      if (generation !== this._connectionGeneration) throw new Error('HID connection changed during flash write.');
       const chunk = bytes.slice(offset, offset + 10);
       const addr = address + offset;
       const request = packetBody(OPCODE.WRITE_FLASH, { address: addr, length: chunk.length, payload: chunk });
@@ -271,6 +297,7 @@ export class CompXDevice extends EventTarget {
       if (pacingMs) await new Promise((resolve) => setTimeout(resolve, pacingMs));
       offset += chunk.length;
     }
+    if (generation !== this._connectionGeneration) throw new Error('HID connection changed during flash write.');
     if (verify) {
       const check = await this.readFlash(address, bytes.length);
       if (!bytes.every((value, i) => check[i] === value)) {

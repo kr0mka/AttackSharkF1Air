@@ -145,8 +145,9 @@ function macroHeader(event) {
   return code;
 }
 
-export function encodeMacro({ name = 'Macro', events = [] } = {}) {
-  const out = new Uint8Array(MACRO_SLOT_SIZE);
+export function encodeMacro({ name = 'Macro', events = [] } = {}, { original = null } = {}) {
+  if (original && original.length !== MACRO_SLOT_SIZE) throw new Error('Original macro slot must contain 384 bytes.');
+  const out = original ? Uint8Array.from(original) : new Uint8Array(MACRO_SLOT_SIZE);
   const encodedName = new TextEncoder().encode(String(name));
   const nameBytes = encodedName.slice(0, 30);
   const safeEvents = events.slice(0, 70);
@@ -191,8 +192,9 @@ export function decodeMacro(raw) {
   return { name, events, valid: checksumValid(raw.slice(0, checksumIndex + 1)) };
 }
 
-export function encodeShortcut(events = []) {
-  const out = new Uint8Array(SHORTCUT_SLOT_SIZE);
+export function encodeShortcut(events = [], { original = null } = {}) {
+  if (original && original.length !== SHORTCUT_SLOT_SIZE) throw new Error('Original shortcut slot must contain 32 bytes.');
+  const out = original ? Uint8Array.from(original) : new Uint8Array(SHORTCUT_SLOT_SIZE);
   const safe = events.slice(0, 6);
   out[0] = safe.length;
   let cursor = 1;
