@@ -112,7 +112,7 @@ The desktop DLL reads a 232-byte base-settings block (`0x0000..0x00E7`). The fol
 | `0x00B5` | 2 | highest-performance state |
 | `0x00B7` | 2 | highest-performance timer |
 | `0x00B9` | 2 | sensor LP/HP mode |
-| `0x00BD..0x00E7` | mixed | newer advanced/dynamic-sensitivity records; integrity/layout known, semantics partly unresolved |
+| `0x00BD..0x00E7` | mixed | advanced records; structure recovered, feature associations and semantics unproven |
 
 ### Extended advanced records
 
@@ -122,7 +122,7 @@ The bundled parser validates the following post-`0xB9` records:
 - four records of `4 data bytes + checksum` at `0xC3`, `0xC8`, `0xCD`, `0xD2`;
 - a compact record beginning at `0xDB`.
 
-The desktop language resources identify the related feature group as **DPI Dynamic Sensitivity** (Classic/Natural/Jump/Custom). The exact semantic mapping of every byte has not yet been proven from F1 AIR hardware, so these fields are currently preserved by backup/restore and shown in Diagnostics rather than relabeled speculatively.
+Shared desktop language resources contain **DPI Dynamic Sensitivity** names (Classic/Natural/Jump/Custom), but do not establish a relationship to these addresses or F1 AIR support. The owner reports no such control in the current official UI. These advanced bytes remain semantically unassigned; Diagnostics labels them as unverified advanced records. Raw backups retain them, normal restore leaves current candidate/unmapped bytes untouched, and Expert restore can copy them back.
 
 ## Polling-rate values
 

@@ -27,7 +27,7 @@ export const FLASH_FIELDS = Object.freeze([
   { start: 0x00b5, end: 0x00b6, name: 'Highest-performance state', confidence: CONFIDENCE.LIKELY },
   { start: 0x00b7, end: 0x00b8, name: 'Highest-performance timer', confidence: CONFIDENCE.LIKELY },
   { start: 0x00b9, end: 0x00ba, name: 'Sensor LP / HP mode', confidence: CONFIDENCE.LIKELY },
-  { start: 0x00bd, end: 0x00e7, name: 'Dynamic sensitivity / advanced sensor records', confidence: CONFIDENCE.CANDIDATE },
+  { start: 0x00bd, end: 0x00e7, name: 'Advanced records (semantics unverified)', confidence: CONFIDENCE.CANDIDATE },
   { start: 0x0100, end: 0x02ff, name: 'Shortcut / combo slots', confidence: CONFIDENCE.LIKELY },
   { start: 0x0300, end: 0x1aff, name: 'Macro slots', confidence: CONFIDENCE.LIKELY },
   { start: 0x1b00, end: 0x1b2f, name: 'PAW3955 high-resolution DPI table', confidence: CONFIDENCE.VERIFIED },

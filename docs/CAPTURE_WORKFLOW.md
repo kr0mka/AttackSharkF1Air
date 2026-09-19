@@ -3,7 +3,7 @@
 Open **Diagnostics → Protocol capture lab** in Open Control. Captures only read flash; they never change settings or enter the bootloader.
 
 1. Export a backup from Profiles & device before experiments.
-2. Select a preset and describe the one official setting/value transition in the notes.
+2. Choose a setting that is actually visible in the official UI for your device, then select the matching capture preset and describe the one value transition in the notes. Shared language resources do not prove that a control is available on F1 AIR.
 3. Click **Capture baseline**, then **Export JSON**. Export before reloading/closing the page or changing presets; snapshots are otherwise held only in memory. Disconnecting retains them.
 4. Disconnect Open Control. In official Control HUB, change exactly one setting, keeping the same device and onboard profile. Close/disconnect Control HUB to release HID ownership.
 5. Reconnect Open Control. Import the baseline if the page was reloaded. Select the same device and active profile. Click **Capture after**.
@@ -30,8 +30,8 @@ Comparison refuses differing device identities, profiles, region sets or ranges.
 
 ## Experiments still needed
 
-- Dynamic Sensitivity: Sensor baseline, then Classic → Natural → Jump → Custom in separate pairs. For Custom, change only one point/axis per capture. Record official input/output values. Resource option IDs do not prove flash encoding.
-- Sensor controls: one LP/HP, motion-sync, ripple, angle-snap, performance or 20K-scan transition per pair.
+- Dynamic Sensitivity: deferred. The owner reports no such control in the current official UI. Classic/Natural/Jump/Custom are shared resource strings, not proof of F1 AIR support. Only revisit this experiment if the control is actually observed on F1 AIR; no firmware update or raw write is justified to try to expose it.
+- Sensor controls: choose one visible control (for example motion sync, ripple or angle snapping) and capture one transition per pair. Skip controls absent from the official UI. LOD can also be used to check the capture workflow against its already-verified mapping.
 - Macro repeat: keep identical events and name; change only repeat policy. Capture **both Buttons and Macros** before and after. Export each baseline before switching presets. Do not assume repeat bits reside only in the macro slot.
 - Mouse lighting: one effect/color/state change at a time using Lighting.
 - Receiver lighting: use **Read receiver lighting → Export endpoint JSON** before and after one official change. This captures `0x2D` and `0x19`; receiver state does not live in the flash Lighting preset. Compare endpoint bodies separately, retaining errors as errors.

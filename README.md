@@ -27,7 +27,7 @@ The application implements the F1 AIR / PAW3955 control surface with:
 
 Verified LOD and side-button mappings are documented in [F1_AIR_LOD.md](docs/F1_AIR_LOD.md) and [F1_AIR_BUTTONS.md](docs/F1_AIR_BUTTONS.md).
 
-Dynamic Sensitivity, rotation, 20K scanning values, lighting assignment semantics and macro repeat bindings still need controlled captures. Candidate scalar fields, unknown button parameters and receiver indicator writes require **Expert writes**. Resource enum values alone do not establish their packet encoding.
+Dynamic Sensitivity appears in shared vendor resources, but F1 AIR availability is unconfirmed and the owner does not see it in the current official UI. It is not a required capture or an established F1 AIR feature. Rotation, 20K scanning values, lighting assignment semantics and macro repeat bindings still need controlled captures for controls actually exposed by the device. Candidate scalar fields, unknown button parameters and receiver indicator writes require **Expert writes**. Resource enum values alone do not establish their packet encoding.
 
 The wireless `0xB3` endpoint returned v5.02 while the official app displayed v5.23. Diagnostics exports raw `0x12`, `0x1D` and `0xB3` replies; the app does not equate `0xB3` with the official mouse firmware display.
 
@@ -103,9 +103,9 @@ Do not broaden the WebHID filter to every `0x3554` device unless you understand 
 
 Use the [capture workflow](docs/CAPTURE_WORKFLOW.md). Diagnostics works disconnected for importing/comparing captures. Snapshots stay in memory across disconnects and tab changes; export before reloading or closing the page. It is designed for finishing the remaining F1-specific unknowns. The most useful captures are:
 
-- Sensor preset before/after selecting Classic, Natural, Jump or Custom Dynamic Sensitivity;
+- Sensor preset before/after changing one control that is actually visible in the official UI, such as motion sync, ripple or angle snapping;
 - button record before/after binding one known macro with each repeat policy;
-- base dump before/after changing Dynamic Sensitivity / sensor rotation if those controls appear for your firmware.
+- optional captures of additional controls only after confirming they appear for your device and firmware. Do not search for or try to unlock Dynamic Sensitivity based on shared resource strings.
 
 Please avoid committing the proprietary `HIDUsb.dll`, official executables or firmware binaries to this repository. Commit only short, factual protocol observations or your own captures.
 
